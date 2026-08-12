@@ -1,28 +1,30 @@
-# THE SECOND TEST OUTPUT — the cell whose subject is a RAISE, and the runner that reads it.
+# THE SECOND TEST OUTPUT — the cells whose `expr` CAN ABORT, and the runner that reads them.
 #
-# The vendored escape set carries `]`, which nixpkgs' does not. Escaping it yields `\]`, and the
-# regex engine rejects that outright, so `hasInfix` with a `]` anywhere in the needle raises instead
-# of answering — for the copy and for the original alike. That deviation is not a gap in the copy,
-# it IS the copy being faithful, and it stays measured rather than skipped: if the original is ever
-# corrected, this cell is what notices, because a call that starts answering stops raising.
+# `]` is the one character whose escape-set membership decides whether `hasInfix` answers at all.
+# Outside a bracket expression it is already literal, so escaping it yields `\]`, which the regex
+# engine rejects outright: a set carrying `]` aborts on every `]`-bearing needle, and a set without
+# it returns the same boolean nixpkgs does. Neither the vendored copy (../prelude.nix) nor
+# gen-prelude carries it, so both ANSWER, and the cells below assert that answer against a stated
+# value. Put `]` back into either set and the corresponding call stops answering and aborts.
 #
-# `builtins.tryEval` does not catch this class — it catches thrown errors and failed assertions, not
-# an evaluation error from a rejected regex — so the only assertion available is nix-unit's
-# `expectedError`.
+# `builtins.tryEval` does not catch that class — it catches thrown errors and failed assertions, not
+# an evaluation error from a rejected regex — so nix-unit's `expectedError` is the only assertion
+# that could hold such an abort, and these are the cells that would need it.
 #
-# ★ WHY A SECOND OUTPUT RATHER THAN A CELL IN `flake.tests`. The batch asserter behind
+# ★ WHY A SECOND OUTPUT RATHER THAN CELLS IN `flake.tests`. The batch asserter behind
 # `checks.default` (../flakeModule.nix) evaluates `expr == expected` unconditionally and quantifies
-# over `flake.tests` and nothing else. A cell with no `expected` and a raising `expr` therefore
-# CRASHES that gate rather than failing a cell. Hosting it on `flake.testsError` puts it outside
-# that quantifier while keeping it live on the nix-unit path. The split is structural, not
-# conventional: this file is not under `./tests`, which is the whole of `testModules`, so nothing
-# depends on a filter predicate or a naming habit.
+# over `flake.tests` and nothing else. An `expr` that aborts therefore CRASHES that gate rather than
+# failing a cell — so a subject that CAN abort belongs outside that quantifier whether or not it is
+# aborting today. Hosting these on `flake.testsError` keeps them live on the nix-unit path and makes
+# a regression in either escape set fail a cell instead of taking the gate down. The split is
+# structural, not conventional: this file is not under `./tests`, which is the whole of
+# `testModules`, so nothing depends on a filter predicate or a naming habit.
 #
 # BOTH OUTPUTS NEED RUNNING, so both get a hook. The `ci` hook the shared flake module builds bakes
 # `./ci#tests` into its own text and cannot be pointed here; `ci-error` below is its counterpart.
 #
 #   nix-unit --flake ./ci#tests        # the suites
-#   nix-unit --flake ./ci#testsError   # this cell
+#   nix-unit --flake ./ci#testsError   # these cells
 {
   lib,
   genPrelude,
@@ -36,38 +38,33 @@
   options.flake.testsError = lib.mkOption {
     type = lib.types.lazyAttrsOf (lib.types.lazyAttrsOf lib.types.raw);
     default = { };
-    description = "Test suites whose cells assert an ERROR: { suite.test = { expr; expectedError; }; }. Read by `nix-unit --flake ./ci#testsError`; deliberately outside `flake.tests`, which the batch asserter quantifies over.";
+    description = "Test suites whose cells' `expr` CAN ABORT: { suite.test = { expr; expected | expectedError; }; }. Read by `nix-unit --flake ./ci#testsError`; deliberately outside `flake.tests`, which the batch asserter forces every `expr` of and would crash on rather than fail.";
   };
 
   config = {
     flake.testsError.escape-set = {
-      # The message is asserted, not merely the failure: a raise from some other cause would be a
-      # different fact about the copy.
-      test-close-bracket-raises = {
+      # The answer is asserted, not merely the absence of an abort: `]` is passed through unescaped
+      # and matched as the literal it already is, so the boolean is nixpkgs'.
+      test-close-bracket-answers = {
         expr = genPrelude.hasInfix "]" "a]b";
-        expectedError = {
-          type = "EvalError";
-          msg = ".*invalid regular expression.*";
-        };
-      };
-
-      # The original raises identically, which is what makes the deviation the original's rather
-      # than the copy's. Drop `]` from either escape set and the corresponding cell stops raising.
-      test-upstream-close-bracket-raises-identically = {
-        expr = upstreamPrelude.hasInfix "]" "a]b";
-        expectedError = {
-          type = "EvalError";
-          msg = ".*invalid regular expression.*";
-        };
-      };
-
-      # LIVE CONTROL, same run: a needle without `]` answers rather than raising. Without it the
-      # two cells above are consistent with a function that raises on everything. It is an
-      # `expected` cell on an `expectedError` output deliberately — a control has to run in the
-      # same invocation as the thing it controls.
-      test-control-a-needle-without-it-answers = {
-        expr = genPrelude.hasInfix "[a" "x[ay";
         expected = true;
+      };
+
+      # The original answers identically, which is what makes the domain the original's rather than
+      # the copy's. Put `]` into either escape set and exactly one of these two cells aborts, naming
+      # which side moved.
+      test-upstream-close-bracket-answers-identically = {
+        expr = upstreamPrelude.hasInfix "]" "a]b";
+        expected = true;
+      };
+
+      # LIVE CONTROL, same run: a `]` needle the haystack lacks answers false. Without it the two
+      # cells above are satisfied by a predicate stuck at `true`, which is the vacuity an assertion
+      # about a returned boolean invites and an assertion about an abort did not. A control has to
+      # run in the same invocation as the thing it controls, so it stays on this output.
+      test-control-a-missing-close-bracket-answers-false = {
+        expr = genPrelude.hasInfix "]" "ab";
+        expected = false;
       };
     };
 

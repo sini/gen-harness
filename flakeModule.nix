@@ -18,12 +18,18 @@ let
   tests = config.flake.tests;
 
   # KNOWN LIMIT, and it belongs to this gate rather than to the suites it reads: `expr` is forced
-  # for every cell unconditionally, so a cell asserting an expected ERROR crashes the check instead
-  # of failing it. The nix-unit runner supports error assertions natively, so the two runners
-  # disagree about what a suite may contain — and a guard whose whole purpose is to abort for a
-  # named reason cannot be tested for its own firing through this path. Until the asserter learns
-  # to skip cells that carry an error expectation, those cells go on a separate output, outside the
-  # `flake.tests` quantifier below; this repository's own ci does exactly that.
+  # for every cell unconditionally, so a cell whose `expr` ABORTS crashes the check instead of
+  # failing it. The nix-unit runner holds such cells natively, so the two runners disagree about
+  # what a suite may contain — and a guard whose whole purpose is to abort for a named reason
+  # cannot be tested for its own firing through this path.
+  #
+  # The predicate for the separate output is CAN-ABORT, not carries-an-error-expectation. A cell
+  # asserting an error is the clearest case but not the only one: a cell asserting an ANSWER that
+  # holds only while some condition does belongs there too, because the abort returns the moment
+  # the condition stops holding, and it would then take this gate down rather than fail a cell.
+  # Until the asserter learns to skip them, those cells go on a separate output, outside the
+  # `flake.tests` quantifier below; this repository's own ci does exactly that, with cells of the
+  # second kind.
   assertTests = lib.mapAttrsToList (
     suite: subtests:
     lib.mapAttrsToList (
@@ -153,8 +159,10 @@ in
         };
 
         # The batch gate, built from the asserter above. Its quantifier is `flake.tests` and
-        # nothing else, which is the structural reason a cell asserting an error has to live on
-        # another output: there is no cell shape this check can hold and skip.
+        # nothing else, which is the structural reason a cell whose `expr` can abort has to live on
+        # another output — a cell asserting an error is the clearest such cell, and one asserting an
+        # answer that only holds while it does not abort is the same problem: there is no cell shape
+        # this check can hold and skip.
         checks.default = pkgs.runCommand "${name}-tests" { } ''
           echo "${toString (builtins.length (lib.flatten assertTests))} tests passed"
           touch $out

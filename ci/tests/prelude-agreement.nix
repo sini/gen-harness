@@ -86,12 +86,13 @@ let
       haystack = "abc";
       expected = false;
     }
-    # `]` is absent from this table because it is outside BOTH implementations' domain: the shared
-    # escape produces `\]`, which Nix's regex engine rejects, so the call raises rather than
-    # answering — measured, and `builtins.tryEval` does not catch that class, so it cannot be
-    # asserted here. nixpkgs does not escape `]` and does answer. The divergence is gen-prelude's
-    # and is recorded at ../../prelude.nix; a fix there turns the agreement assertion above red,
-    # which is the instrument working.
+    # `]` is absent from this table for a structural reason rather than a domain one. Both
+    # implementations exclude it from the escape set and answer as nixpkgs does — but only while it
+    # stays excluded: escaping it produces `\]`, which Nix's regex engine rejects outright, so
+    # re-adding it to either set turns the call into an abort. `builtins.tryEval` does not catch
+    # that class, and the batch asserter behind `checks.default` forces every `expr` under
+    # `flake.tests`, so a `]` case here would take the gate down instead of failing a cell. The `]`
+    # cells live on ../tests-error.nix's `testsError` output for exactly that reason.
     {
       needle = "[x";
       haystack = "y[xz";

@@ -96,13 +96,14 @@ consequence is stated rather than hidden — a change that stops `mkCi` evaluati
 suite down instead of reporting a red test. Indirect coverage is what catches that case today:
 every library in the ecosystem builds its suite from this repository.
 
-Cells that assert an **error** cannot live in `flake.tests`: the batch asserter behind
-`checks.default` forces every `expr` it finds there, so a raising one crashes the gate rather than
+Cells whose `expr` **can abort** cannot live in `flake.tests`: the batch asserter behind
+`checks.default` forces every `expr` it finds there, so an aborting one crashes the gate rather than
 failing a cell. They go on a second output, `ci/tests-error.nix`, reached through `extraModules` and
-run by its own hook.
+run by its own hook — whether they assert the abort itself (`expectedError`) or the answer that
+holds only while it does not happen.
 
 ```
 nix-unit --flake ./ci#tests          # the suites
-nix-unit --flake ./ci#testsError     # the cells that assert a raise
+nix-unit --flake ./ci#testsError     # the cells whose expr can abort
 nix flake check                      # in ci/ — treefmt, tree-root oracle, hooks
 ```

@@ -31,8 +31,9 @@
         # set has members no case table reaches.
         upstreamSrc = inputs.gen-prelude;
       };
-      # The `]` cell asserts a RAISE, which the batch asserter behind `checks.default` cannot hold —
-      # it forces every `expr` under `flake.tests`. That cell lives on a second output instead.
+      # The `]` cells' `expr` ABORTS the moment `]` re-enters either escape set, and the batch
+      # asserter behind `checks.default` cannot hold that — it forces every `expr` under
+      # `flake.tests`. Those cells live on a second output instead.
       extraModules = [ ./tests-error.nix ];
     };
 }

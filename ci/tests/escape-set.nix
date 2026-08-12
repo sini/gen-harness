@@ -14,9 +14,11 @@
 # unterminated bracket is not a valid regex); both redden, and which of the two a member produces
 # is a property of the character, not a choice.
 #
-# The thirteenth member, `]`, cannot have a cell here: escaped, it yields `\]`, which the regex
-# engine rejects outright, so the call raises whatever the haystack is. It is asserted where an
-# error can be asserted — `../tests-error.nix`, on the `testsError` output.
+# `]` is a NON-member, and its non-membership is asserted rather than assumed: outside a bracket
+# expression it is already literal, so escaping it would yield `\]`, which the engine rejects — a
+# set carrying it aborts on every `]`-bearing needle instead of answering. That cell cannot live
+# here, because an `expr` that aborts the moment `]` is re-added would crash the batch asserter
+# behind `checks.default` rather than fail. It is on `../tests-error.nix`'s `testsError` output.
 {
   genPrelude,
   upstreamPrelude,
@@ -42,8 +44,8 @@ let
   # The set read from source, so that a member added later without a cell below is caught here
   # rather than left quietly uncovered. Entries contribute exactly two quotes each, so the count is
   # quote-based rather than line-based: it survives reformatting, which a line count would not.
-  # The list contains `"]"`, so the terminator searched for is `];` — a sequence the entries
-  # themselves cannot produce.
+  # The terminator searched for is `];` rather than `]` — a two-character sequence no
+  # single-character entry can produce, whatever the set's membership becomes.
   escapeBlock = src: lib.head (lib.splitString "];" (lib.last (lib.splitString "metachars = [" src)));
   quoteCount = s: (lib.length (lib.splitString "\"" s)) - 1;
   squeeze = s: lib.replaceStrings [ " " "\n" ] [ "" "" ] s;
@@ -53,7 +55,7 @@ let
 in
 {
   flake.tests.escape-set = {
-    # ── the twelve members a boolean can reach ──
+    # ── one cell per member ──
 
     # `\` unescaped leaves a lone backslash as the whole pattern: not a valid regex.
     test-backslash = agree "\\" "a\\b" true;
@@ -94,16 +96,16 @@ in
 
     # ── the set itself ──
 
-    # Twelve cells above plus the `]` cell on the error output cover thirteen members. If this
-    # count moves, a member has no cell and the coverage claim above is stale.
-    test-set-has-thirteen-members = {
+    # Twelve cells above, one per member, and the set is twelve. If this count moves, either a
+    # member arrived without a cell or `]` came back — both stale the coverage claim above.
+    test-set-has-twelve-members = {
       expr = {
         vendored = (quoteCount vendoredBlock) / 2;
         upstream = (quoteCount upstreamBlock) / 2;
       };
       expected = {
-        vendored = 13;
-        upstream = 13;
+        vendored = 12;
+        upstream = 12;
       };
     };
 
