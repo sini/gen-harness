@@ -86,16 +86,23 @@ exists to cut. A library taking this route needs `gen-prelude` declared at its *
 
 ## Testing the harness
 
-`ci/` is a separate flake and hosts the harness's own suites plus the ecosystem's cross-library
-integration tests — the ones whose subject is a pairing rather than a single library, and which
-therefore have no honest home in either library's own repository.
+`ci/` is a separate flake. It hosts the harness's own suites, and it is where the ecosystem's
+cross-library integration suites — the ones whose subject is a pairing rather than a single library,
+and which therefore have no honest home in either library's own repository — **will** live. None has
+moved yet: `ci/tests/` holds three suites today and all three are about the harness.
 
 It reaches `mkCi` through `root.url = "path:.."`: the harness tests itself with itself. The
 consequence is stated rather than hidden — a change that stops `mkCi` evaluating takes its own
 suite down instead of reporting a red test. Indirect coverage is what catches that case today:
 every library in the ecosystem builds its suite from this repository.
 
+Cells that assert an **error** cannot live in `flake.tests`: the batch asserter behind
+`checks.default` forces every `expr` it finds there, so a raising one crashes the gate rather than
+failing a cell. They go on a second output, `ci/tests-error.nix`, reached through `extraModules` and
+run by its own hook.
+
 ```
 nix-unit --flake ./ci#tests          # the suites
+nix-unit --flake ./ci#testsError     # the cells that assert a raise
 nix flake check                      # in ci/ — treefmt, tree-root oracle, hooks
 ```
