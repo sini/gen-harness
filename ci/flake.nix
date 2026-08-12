@@ -27,6 +27,12 @@
       # what the agreement suite is about — overriding it here would test a value no consumer gets.
       specialArgs = {
         upstreamPrelude = inputs.gen-prelude.lib;
+        # The original's SOURCE as well as its value: the escape set is compared as text, because a
+        # set has members no case table reaches.
+        upstreamSrc = inputs.gen-prelude;
       };
+      # The `]` cell asserts a RAISE, which the batch asserter behind `checks.default` cannot hold —
+      # it forces every `expr` under `flake.tests`. That cell lives on a second output instead.
+      extraModules = [ ./tests-error.nix ];
     };
 }
