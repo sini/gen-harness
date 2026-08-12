@@ -10,9 +10,9 @@
 #
 # Each cell states, in its comment, what the pattern would MEAN with that member unescaped — that is
 # the reason the pair discriminates, and it is what makes the cell a test rather than a sample.
-# Roughly half flip a boolean and half raise (an unbalanced group or an unterminated bracket is not
-# a valid regex); both redden, and the split between them is a property of the character, not a
-# choice.
+# Measured over the twelve: eight flip a boolean and four raise (an unbalanced group or an
+# unterminated bracket is not a valid regex); both redden, and which of the two a member produces
+# is a property of the character, not a choice.
 #
 # The thirteenth member, `]`, cannot have a cell here: escaped, it yields `\]`, which the regex
 # engine rejects outright, so the call raises whatever the haystack is. It is asserted where an

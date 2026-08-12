@@ -19,7 +19,8 @@
 # leading/trailing `.*` make std::regex recurse to depth ∝ `stringLength s`, overflowing the C
 # stack when scanning whole source files — which is exactly what a purity scan does, and why the
 # harness hands this function to every suite. Splitting on the escaped literal carries no `.*`
-# anchor and scans linearly. The result is the same boolean, so it is a drop-in.
+# anchor and scans linearly. The result is the same boolean — with one measured exception, the
+# next paragraph's — so it is a drop-in.
 #
 # ONE MEASURED DOMAIN LIMIT, INHERITED AND KEPT. The metacharacter set below is gen-prelude's, and
 # gen-prelude's is nixpkgs' twelve plus `]`. Escaping `]` yields `\]`, which Nix's regex engine
@@ -28,7 +29,8 @@
 # purpose: agreement with the original is the property the ci suite asserts, so a corrected
 # original must turn that suite red and pull the correction through, which a copy that had already
 # "fixed" itself could not do. `builtins.tryEval` does not catch this class, so the limit is
-# recorded here rather than asserted in a test.
+# asserted where an error can be — ./ci's second test output, `testsError`, which the batch
+# asserter behind `checks.default` does not quantify over.
 let
   inherit (builtins) length replaceStrings split;
 
