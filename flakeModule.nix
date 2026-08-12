@@ -17,6 +17,13 @@ in
 let
   tests = config.flake.tests;
 
+  # KNOWN LIMIT, and it belongs to this gate rather than to the suites it reads: `expr` is forced
+  # for every cell unconditionally, so a cell asserting an expected ERROR crashes the check instead
+  # of failing it. The nix-unit runner supports error assertions natively, so the two runners
+  # disagree about what a suite may contain — and a guard whose whole purpose is to abort for a
+  # named reason cannot be tested for its own firing through this path. Until the asserter learns
+  # to skip cells that carry an error expectation, those cells go on a separate output, outside the
+  # `flake.tests` quantifier below; this repository's own ci does exactly that.
   assertTests = lib.mapAttrsToList (
     suite: subtests:
     lib.mapAttrsToList (
@@ -113,6 +120,20 @@ in
             nixfmt.enable = true;
             mdformat = {
               enable = true;
+              # KNOWN DEFECT, MEASURED, DELIBERATELY NOT REPAIRED HERE: none of these five plugins
+              # reaches the formatter. treefmt-nix builds its final package as
+              # `cfg.package.withPlugins cfg.plugins`, and mdformat's `withPlugins` wraps a
+              # hardcoded plain base rather than the package it is called on — so `package` and
+              # `plugins` do not union, and a plugin list written into `package` is DISCARDED
+              # (the resulting derivation is plain mdformat, store-path-identical). Every consumer
+              # of this module therefore formats markdown with a plugin-less mdformat, which
+              # rewrites YAML frontmatter it does not recognise; one repository's frontmatter has
+              # already been destroyed that way, with the gate green afterwards because the damage
+              # is idempotent. The repair routes the set through `programs.mdformat.plugins`, the
+              # option treefmt-nix honours, and DELETES this line rather than supplementing it —
+              # but it also has to decide the set (one of these is measured destructive on real
+              # tables), so it is a change with its own argument to make, not a repair to fold into
+              # a relocation.
               package = pkgs.mdformat.withPlugins (p: [
                 p.mdformat-beautysh
                 p.mdformat-footnote
@@ -131,6 +152,9 @@ in
           formatter = self'.formatter;
         };
 
+        # The batch gate, built from the asserter above. Its quantifier is `flake.tests` and
+        # nothing else, which is the structural reason a cell asserting an error has to live on
+        # another output: there is no cell shape this check can hold and skip.
         checks.default = pkgs.runCommand "${name}-tests" { } ''
           echo "${toString (builtins.length (lib.flatten assertTests))} tests passed"
           touch $out
