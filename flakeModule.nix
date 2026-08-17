@@ -26,17 +26,24 @@ let
   #   · footnote       — a `[^1]:` line is a FOOTNOTE DEFINITION; without it the construct is
   #                      escaped. Measured protective rather than cosmetic.
   #   · simple-breaks  — a thematic break renders as `---` rather than the underscore run.
+  #   · gfm            — a `|`-delimited row is a TABLE ROW. Without it the row is ordinary prose,
+  #                      where `\|` is a redundant escape the formatter normalises away — so a
+  #                      cell holding a literal pipe silently becomes several cells the next time
+  #                      the document is rendered. Measured on a real row: 2 cells against a
+  #                      2-column header became 5. This ecosystem's markdown is read as
+  #                      GitHub-flavoured markdown, which is what makes the escape required rather
+  #                      than decorative.
   #
   # ★ NAMED so a consumer can EXTEND it, and deliberately NOT reachable for removal:
   # `programs.mdformat.plugins` REPLACES, so a consumer writing `plugins = p: [ p.mdformat-gfm ]`
-  # meaning to add gfm would silently drop all three and nothing would report it. A consumer
-  # cannot express that mistake through `extraPlugins` — absence yields the invariant, not its
-  # negation.
+  # meaning to add one plugin would silently drop the others and nothing would report it. A
+  # consumer cannot express that mistake through `extraPlugins` — absence yields the invariant,
+  # not its negation.
   #
-  # ★ The omissions are decisions: `gfm` is measured destructive on real tables and is genuinely
-  # per-corpus, which is what `extraPlugins` is for; `beautysh` is rejected on two independent
-  # grounds — it reports `ERROR` while exiting 0, the silent-failure class this repair removes,
-  # and it transitively enables gfm through its dependency edge.
+  # ★ The omission is a decision: `beautysh` is rejected because it reports `ERROR` while exiting
+  # 0, which is the silent-failure class this repair removes. That ground is independent of gfm's
+  # disposition — it rejected beautysh while gfm was excluded and it rejects it now that gfm is a
+  # member, so beautysh does not arrive on gfm's coat-tails through its dependency edge.
   #
   # This is a second instance of gen's own list rather than a shared file: the two repositories
   # are separate, and the standing conformance rule between this module and gen's copy governs
@@ -44,6 +51,7 @@ let
   mdformatBasePlugins = p: [
     p.mdformat-footnote
     p.mdformat-frontmatter
+    p.mdformat-gfm
     p.mdformat-simple-breaks
   ];
   # Bound HERE rather than inside `perSystem`, whose own `config` argument shadows this one.
@@ -82,16 +90,16 @@ in
 
   # The EXTENSION point, and it is an extension rather than an override on purpose. The base set
   # defends representational invariants of markdown, which are uniform across every repository
-  # that writes markdown and are therefore not a per-corpus preference. What IS per-corpus — gfm
-  # being the measured case — arrives here, added to the base rather than replacing it.
+  # that writes markdown and are therefore not a per-corpus preference. A genuinely per-corpus
+  # plugin arrives here, added to the base rather than replacing it.
   options.gen.ci.mdformat.extraPlugins = lib.mkOption {
     type = lib.types.functionTo (lib.types.listOf lib.types.package);
     default = _: [ ];
     description = ''
       Plugins ADDED to mkCi's base mdformat set. The base set is not reachable for removal
       through this option, by construction: `programs.mdformat.plugins` replaces rather than
-      extends, so a consumer setting it directly would silently drop frontmatter, footnote and
-      simple-breaks and nothing would report it.
+      extends, so a consumer setting it directly would silently drop frontmatter, footnote, gfm
+      and simple-breaks and nothing would report it.
     '';
   };
 
