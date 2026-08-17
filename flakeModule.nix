@@ -51,6 +51,18 @@ in
   config = {
     systems = lib.systems.flakeExposed;
 
+    # testSingletons.<suite>.<test> = { <test> = leaf; } — re-nests each leaf under a group keyed by its
+    # OWN (test-prefixed) name, so `--flake .#testSingletons.<suite>.<test>` makes that singleton the
+    # group root → nix-unit runs exactly one test. nix-unit treats the target attrpath ENDPOINT as a
+    # GROUP and detects a test by the `test` NAME-PREFIX of a group child (verified on 2.35.0: a
+    # `{expr;expected;}` child named `only` runs 0/0, `test-only` runs 1/1). Pointing it at a bare
+    # `{expr;expected;}` leaf (`#tests.<suite>.<test>`) makes that leaf the group and finds no
+    # test-prefixed child, so it silently reports `0/0 successful` — a false pass. The wrap works because
+    # `${tn}` reuses the original test-prefixed name as the singleton child. This view is the fix.
+    flake.testSingletons = lib.mapAttrs (
+      _suite: subtests: lib.mapAttrs (tn: t: { ${tn} = t; }) subtests
+    ) config.flake.tests;
+
     perSystem =
       {
         self',
@@ -185,10 +197,20 @@ in
           commands = [
             {
               name = "ci";
-              help = "Run all checks, or a specific test [ci] [ci suite.test]";
+              help = "Run all checks, or a specific test [ci] [ci suite] [ci suite.test]";
               command = ''
+                # A `suite.test` arg must target the `testSingletons` view: nix-unit treats the attrpath
+                # endpoint as a GROUP and detects tests by the `test` name-prefix of a group child, so
+                # `#tests.<suite>.<test>` (a bare leaf, no test-prefixed child) reports a silent
+                # `0/0 successful`. `testSingletons.<suite>.<test>` re-nests the leaf under a child keyed
+                # by its own test-prefixed name, so the singleton runs 1/1. Bare suite / no arg → `tests`.
+                if [ -n "''${1:-}" ] && [ "''${1#*.}" != "''$1" ]; then
+                  target="testSingletons.$1"
+                else
+                  target="tests''${1:+.$1}"
+                fi
                 nix-unit \
-                  --flake "$FLAKE_ROOT/ci#tests''${1:+.$1}" \
+                  --flake "$FLAKE_ROOT/ci#$target" \
                   --gc-roots-dir "$FLAKE_ROOT/ci/.gcroots" "''${@:2}"
               '';
             }
