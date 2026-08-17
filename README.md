@@ -41,13 +41,13 @@ the harness plus the tools, with no library it did not ask for.
 
 `lib.mkCi` is the only output. Its arguments:
 
-| argument | meaning |
-| -------------- | --------------------------------------------------------------------------- |
-| `inputs` | the calling flake's inputs — `nixpkgs` is required, tools are optional |
-| `name` | the library's name; labels the generated checks, devshell and hook binaries |
-| `testModules` | a directory of test modules, imported as a tree |
-| `specialArgs` | extra module arguments; overrides anything the harness sets, `genPrelude` too |
-| `extraModules` | flake-parts modules appended to the harness's own |
+| argument       | meaning                                                                       |
+| -------------- | ----------------------------------------------------------------------------- |
+| `inputs`       | the calling flake's inputs — `nixpkgs` is required, tools are optional        |
+| `name`         | the library's name; labels the generated checks, devshell and hook binaries   |
+| `testModules`  | a directory of test modules, imported as a tree                               |
+| `specialArgs`  | extra module arguments; overrides anything the harness sets, `genPrelude` too |
+| `extraModules` | flake-parts modules appended to the harness's own                             |
 
 A test module sets `flake.tests.<suite>.<name> = { expr; expected; };` and receives `name`,
 `genInputs`, `genPrelude` and whatever `specialArgs` adds. Suites run under
