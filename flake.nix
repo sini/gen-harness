@@ -28,8 +28,30 @@
     git-hooks-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  # One output. Every consuming test flake reaches exactly this symbol.
   outputs = inputs: {
+    # The symbol every consuming test flake reaches.
     lib.mkCi = import ./mkCi.nix { inherit inputs; };
+
+    # The check builders and the plugin set, for a consumer that is gated by this machinery
+    # without being an mkCi consumer — the gen hub's own ci is the case: it exposes flake checks
+    # and a perf app rather than a nix-unit `tests` output, so it cannot take the module, but the
+    # repository that ships these gates must be gated by them.
+    #
+    # ★ THEY ARE DECLARED SURFACE RATHER THAN FILE LAYOUT ON PURPOSE. A consumer could import
+    # these paths out of the store directly and need nothing from this flake; then a rename here
+    # would break that consumer with this repository's own gate green, which is the silent
+    # coupling the extraction exists to remove. Declared, they are refutable by this repository's
+    # CI before a consumer ever bumps.
+    #
+    # PURE FUNCTIONS OF `pkgs` — no flake-parts module, no gen input, no evaluation of this
+    # flake's own inputs.
+    lib.checks.treefmtTreeRoot = import ./treefmt-tree-root.nix;
+    lib.checks.mdformatPlugins = import ./mdformat-plugins-check.nix;
+
+    # `{ names, plugins }` — the membership fact and the `programs.mdformat.plugins` value built
+    # from it. Both are published because a consumer that installs the set must also be able to
+    # hand its names to the guard, and deriving them at the call site would be a second
+    # statement of the membership.
+    lib.mdformatBasePlugins = import ./mdformat-plugins.nix;
   };
 }

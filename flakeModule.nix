@@ -17,43 +17,17 @@ in
 let
   tests = config.flake.tests;
 
-  # THE BASE MDFORMAT PLUGIN SET — the representational invariants of markdown this ecosystem
-  # defends. Each member answers what a construct MEANS, not how it looks:
-  #   · frontmatter    — a leading `---` block is STRUCTURED DATA. Without it mdformat reads that
-  #                      block as a thematic break plus a heading and rewrites it; one
-  #                      repository's frontmatter was destroyed exactly that way, and the gate
-  #                      stayed green afterwards because the damage is idempotent.
-  #   · footnote       — a `[^1]:` line is a FOOTNOTE DEFINITION; without it the construct is
-  #                      escaped. Measured protective rather than cosmetic.
-  #   · simple-breaks  — a thematic break renders as `---` rather than the underscore run.
-  #   · gfm            — a `|`-delimited row is a TABLE ROW. Without it the row is ordinary prose,
-  #                      where `\|` is a redundant escape the formatter normalises away — so a
-  #                      cell holding a literal pipe silently becomes several cells the next time
-  #                      the document is rendered. Measured on a real row: 2 cells against a
-  #                      2-column header became 5. This ecosystem's markdown is read as
-  #                      GitHub-flavoured markdown, which is what makes the escape required rather
-  #                      than decorative.
+  # The base mdformat plugin set, from the one file that states which plugins are members.
+  # What each member defends, and why beautysh is not one, are documented there beside the
+  # names — so this module holds no second statement of the membership to go stale.
   #
   # ★ NAMED so a consumer can EXTEND it, and deliberately NOT reachable for removal:
   # `programs.mdformat.plugins` REPLACES, so a consumer writing `plugins = p: [ p.mdformat-gfm ]`
   # meaning to add one plugin would silently drop the others and nothing would report it. A
   # consumer cannot express that mistake through `extraPlugins` — absence yields the invariant,
   # not its negation.
-  #
-  # ★ The omission is a decision: `beautysh` is rejected because it reports `ERROR` while exiting
-  # 0, which is the silent-failure class this repair removes. That ground is independent of gfm's
-  # disposition — it rejected beautysh while gfm was excluded and it rejects it now that gfm is a
-  # member, so beautysh does not arrive on gfm's coat-tails through its dependency edge.
-  #
-  # This is a second instance of gen's own list rather than a shared file: the two repositories
-  # are separate, and the standing conformance rule between this module and gen's copy governs
-  # the pair.
-  mdformatBasePlugins = p: [
-    p.mdformat-footnote
-    p.mdformat-frontmatter
-    p.mdformat-gfm
-    p.mdformat-simple-breaks
-  ];
+  mdformatBase = import ./mdformat-plugins.nix;
+  mdformatBasePlugins = mdformatBase.plugins;
   # Bound HERE rather than inside `perSystem`, whose own `config` argument shadows this one.
   mdformatExtra = config.gen.ci.mdformat.extraPlugins;
 
@@ -98,8 +72,9 @@ in
     description = ''
       Plugins ADDED to mkCi's base mdformat set. The base set is not reachable for removal
       through this option, by construction: `programs.mdformat.plugins` replaces rather than
-      extends, so a consumer setting it directly would silently drop frontmatter, footnote, gfm
-      and simple-breaks and nothing would report it.
+      extends, so a consumer setting it directly would silently drop every base member and
+      nothing would report it. Which plugins are in the base set, and what each one defends,
+      is stated in `mdformat-plugins.nix` and nowhere else.
     '';
   };
 
@@ -218,9 +193,14 @@ in
         # The plugin set is a property of the GENERATED formatter, not of the expression above:
         # the defect this guards was a list that was written and then discarded. Gated where the
         # artefact is built, for the same reason the tree root is.
+        #
+        # `expected` comes from the same value installed above, so the guard cannot fall behind
+        # the set it guards — it did exactly that the last time a member was added, and passed
+        # while that member went unchecked.
         checks.mdformat-plugins = import ./mdformat-plugins-check.nix {
           inherit pkgs name;
           formatter = self'.formatter;
+          expected = mdformatBase.names;
         };
 
         # The batch gate, built from the asserter above. Its quantifier is `flake.tests` and

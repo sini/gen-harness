@@ -30,11 +30,17 @@
   # rather than re-deriving it is what makes the O1 comparison exact: "not plain" has to mean
   # not-plain-for-this-nixpkgs, and a second evaluation could resolve a different one.
   plain ? pkgs.mdformat,
+  # The base set's member NAMES, passed in from the same value the caller installs rather than
+  # restated here. The argument exists because the alternative was measured: a hardcoded loop sat
+  # in this file naming three plugins while the set shipped four, and the check passed green with
+  # a member unguarded. A guard that re-enumerates what it guards lags it.
+  expected ? (import ./mdformat-plugins.nix).names,
 }:
 pkgs.runCommand "${name}-mdformat-plugins"
   {
     inherit formatter;
     plainMdformat = plain;
+    expectedPlugins = builtins.concatStringsSep " " expected;
   }
   ''
     wrapper="$formatter/bin/treefmt"
@@ -83,8 +89,14 @@ pkgs.runCommand "${name}-mdformat-plugins"
     # ── O2 · the base set must be reachable from the command the config names ──
     # Read off the wrapper the config actually runs, so a set that is present in the expression
     # but absent from the artefact still fails.
+    # CONTROL for the loop below: an empty expected set would make the absence test vacuous —
+    # every plugin trivially present — so the set being non-empty is asserted before it is used.
+    if [ -z "$expectedPlugins" ]; then
+      echo "CONTROL FAILED: the expected base plugin set is empty; the O2 loop cannot fire." >&2
+      exit 1
+    fi
     missing=""
-    for plugin in mdformat-footnote mdformat-frontmatter mdformat-gfm mdformat-simple-breaks; do
+    for plugin in $expectedPlugins; do
       if ! grep -q "$plugin" "$md"; then
         missing="$missing $plugin"
       fi
