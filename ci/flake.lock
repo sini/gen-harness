@@ -70,7 +70,55 @@
         "type": "github"
       }
     },
+    "gen-algebra": {
+      "locked": {
+        "lastModified": 1787242575,
+        "narHash": "sha256-swj/IP8UAi/iSY1AxJkMZob+h3+90fKRA/Au3d/dZUg=",
+        "owner": "sini",
+        "repo": "gen-algebra",
+        "rev": "5afecc7f768c964ee8a989ab370ff514751e1a43",
+        "type": "github"
+      },
+      "original": {
+        "owner": "sini",
+        "repo": "gen-algebra",
+        "type": "github"
+      }
+    },
+    "gen-dispatch": {
+      "inputs": {
+        "gen-prelude": "gen-prelude"
+      },
+      "locked": {
+        "lastModified": 1787839567,
+        "narHash": "sha256-Fp52xXaGa7YNEqc7SLPTTOUdAaq1feDeIJNyeWP0oNE=",
+        "owner": "sini",
+        "repo": "gen-dispatch",
+        "rev": "75e819ae31fc4057ccf997bf2a58cf35cb4a6b51",
+        "type": "github"
+      },
+      "original": {
+        "owner": "sini",
+        "repo": "gen-dispatch",
+        "type": "github"
+      }
+    },
     "gen-prelude": {
+      "locked": {
+        "lastModified": 1782849654,
+        "narHash": "sha256-RuSmZU9Sny31YFYfPkagesMDKqGgkQQoNrm4O5Imw2c=",
+        "owner": "sini",
+        "repo": "gen-prelude",
+        "rev": "9e3f4c947c76a11ffec04e020ac7e2a3fe306c47",
+        "type": "github"
+      },
+      "original": {
+        "owner": "sini",
+        "repo": "gen-prelude",
+        "type": "github"
+      }
+    },
+    "gen-prelude_2": {
       "locked": {
         "lastModified": 1786569973,
         "narHash": "sha256-yjCQpB/mznMonUG6qGKQW+bIDVxb8DuToBwmWHRCJnc=",
@@ -82,6 +130,24 @@
       "original": {
         "owner": "sini",
         "repo": "gen-prelude",
+        "type": "github"
+      }
+    },
+    "gen-select": {
+      "inputs": {
+        "gen-algebra": "gen-algebra"
+      },
+      "locked": {
+        "lastModified": 1787801039,
+        "narHash": "sha256-tt0x5efCB37ku4Kqe4m2essf0Z9JERA905Eo4n/lBKs=",
+        "owner": "sini",
+        "repo": "gen-select",
+        "rev": "dbba20c8fbc1976dc3ceb1383918e8706a23130f",
+        "type": "github"
+      },
+      "original": {
+        "owner": "sini",
+        "repo": "gen-select",
         "type": "github"
       }
     },
@@ -210,7 +276,9 @@
     },
     "root": {
       "inputs": {
-        "gen-prelude": "gen-prelude",
+        "gen-dispatch": "gen-dispatch",
+        "gen-prelude": "gen-prelude_2",
+        "gen-select": "gen-select",
         "nixpkgs": "nixpkgs",
         "root": "root_2"
       }

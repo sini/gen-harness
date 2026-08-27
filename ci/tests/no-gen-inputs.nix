@@ -35,11 +35,20 @@ in
     };
 
     # CONTROL, same predicate, same run — the scan can fire. ci's own lock holds the agreement
-    # test's gen-prelude pin, and that pin lives here and nowhere else: it is in the flake
-    # consumers do not pin, so no consumer's lock inherits it.
-    test-control-ci-lock-carries-gen-prelude = {
+    # test's gen-prelude pin plus the cross-library integration suites' own siblings (gen-dispatch,
+    # gen-select) and whatever those siblings pin transitively (gen-select's gen-algebra,
+    # gen-dispatch's own gen-prelude — a second node with the same `repo`, not deduped here for
+    # that reason). None of this lives anywhere consumers pin: it is in the flake they do not pin,
+    # so no consumer's lock inherits it.
+    test-control-ci-lock-carries-its-cross-lib-inputs = {
       expr = genRepos ciLock;
-      expected = [ "gen-prelude" ];
+      expected = [
+        "gen-algebra"
+        "gen-dispatch"
+        "gen-prelude"
+        "gen-prelude"
+        "gen-select"
+      ];
     };
 
     # The tool set is enumerated because five of these are declared by NO consumer and reach every
