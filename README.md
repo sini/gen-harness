@@ -46,12 +46,37 @@ the harness plus the tools, with no library it did not ask for.
 | `inputs`       | the calling flake's inputs — `nixpkgs` is required, tools are optional        |
 | `name`         | the library's name; labels the generated checks, devshell and hook binaries   |
 | `testModules`  | a directory of test modules, imported as a tree                               |
+| `readRoots`    | paths the suite reads BESIDES `testModules`; added to it, never replacing it  |
 | `specialArgs`  | extra module arguments; overrides anything the harness sets, `genPrelude` too |
 | `extraModules` | flake-parts modules appended to the harness's own                             |
 
 A test module sets `flake.tests.<suite>.<name> = { expr; expected; };` and receives `name`,
 `genInputs`, `genPrelude` and whatever `specialArgs` adds. Suites run under
 `nix-unit --flake ./ci#tests`.
+
+### The declared read domain
+
+A suite's evaluator reads a **git-filtered** copy of the repository, so a file git does not know
+about — untracked, or gitignored — is absent from the source the cells are collected from and
+evaluated against. The suite then reports a number that agrees with itself while being short: add
+`ci/tests/new-guard.nix` carrying the cell that proves your new guard fires, forget to `git add`
+it, and the run is **byte-identical** to the run without it.
+
+So the two invocation points **the harness itself wires** — the `ci` pre-commit hook and the `ci`
+devshell command — refuse before `nix-unit` is reached if anything under the declared roots is
+git-unknown, or is a tracked symlink or submodule whose target the declaration does not also cover. It does **not**
+refuse on tracked-modified, tracked-deleted or staged files: those are fully visible to the
+evaluator with their worktree bytes, and refusing them would reject every commit touching a test
+cell. A hand-typed `nix-unit --flake ./ci#tests` is not guarded.
+
+Those two are the harness's own, and they are not the whole set: a consumer's `extraModules` may
+wire further invocation points, which run the guard only if they call it themselves. This
+repository is its own example — `ci/tests-error.nix` adds a third, the `ci-error` hook, on the
+same `\.nix$` trigger, and it does not call the guard.
+
+`testModules` is covered unconditionally, so **most suites declare nothing**. A suite that reads
+outside its collection root — a corpus of documents, a fixture tree beside `ci/` — lists those
+paths in `readRoots`, and they are **added** to the collection root rather than replacing it.
 
 ### Tools
 
