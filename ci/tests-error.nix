@@ -20,27 +20,19 @@
 # structural, not conventional: this file is not under `./tests`, which is the whole of
 # `testModules`, so nothing depends on a filter predicate or a naming habit.
 #
-# BOTH OUTPUTS NEED RUNNING, so both get a hook. The `ci` hook the shared flake module builds bakes
-# `./ci#tests` into its own text and cannot be pointed here; `ci-error` below is its counterpart.
+# BOTH OUTPUTS NEED RUNNING, so both get a hook — and the shared flake module (../flakeModule.nix)
+# wires both, beside each other, off the same read-roots guard. `ci` bakes `./ci#tests` into its own
+# text and cannot be pointed here; `ci-error` is its counterpart and this file supplies only its
+# cells. The option and the hook were stated here once, in ten repositories at once, and drifted.
 #
 #   nix-unit --flake ./ci#tests        # the suites
 #   nix-unit --flake ./ci#testsError   # these cells
 {
-  lib,
   genPrelude,
   upstreamPrelude,
-  genInputs,
   ...
 }:
 {
-  # Same type as `flake.tests`: the same kind of thing, read by the same runner — only the
-  # assertion the cells carry differs.
-  options.flake.testsError = lib.mkOption {
-    type = lib.types.lazyAttrsOf (lib.types.lazyAttrsOf lib.types.raw);
-    default = { };
-    description = "Test suites whose cells' `expr` CAN ABORT: { suite.test = { expr; expected | expectedError; }; }. Read by `nix-unit --flake ./ci#testsError`; deliberately outside `flake.tests`, which the batch asserter forces every `expr` of and would crash on rather than fail.";
-  };
-
   config = {
     flake.testsError.escape-set = {
       # The answer is asserted, not merely the absence of an abort: `]` is passed through unescaped
@@ -67,26 +59,5 @@
         expected = false;
       };
     };
-
-    perSystem =
-      { pkgs, system, ... }:
-      {
-        pre-commit.settings.hooks.ci-error = {
-          enable = true;
-          name = "ci-error";
-          description = "Run nix-unit error-assertion tests";
-          entry = "${
-            pkgs.writeShellApplication {
-              name = "gen-harness-ci-nix-unit-error";
-              runtimeInputs = [ genInputs.nix-unit.packages.${system}.default ];
-              text = ''
-                exec nix-unit --flake ./ci#testsError "$@"
-              '';
-            }
-          }/bin/gen-harness-ci-nix-unit-error";
-          files = "\\.nix$";
-          pass_filenames = false;
-        };
-      };
   };
 }

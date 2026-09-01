@@ -2,7 +2,7 @@
 
 The CI harness the gen ecosystem's test flakes are built from: `mkCi` and the flake module it
 imports. A library's `ci/flake.nix` calls it and gets nix-unit wiring, treefmt with the tree-root
-invariant, a devshell, pre-commit hooks and a `flake.tests` option.
+invariant, a devshell, pre-commit hooks and the `flake.tests` and `flake.testsError` options.
 
 **It declares no gen library input, and that is the whole point of it being a repository.**
 
@@ -62,17 +62,17 @@ evaluated against. The suite then reports a number that agrees with itself while
 `ci/tests/new-guard.nix` carrying the cell that proves your new guard fires, forget to `git add`
 it, and the run is **byte-identical** to the run without it.
 
-So the two invocation points **the harness itself wires** — the `ci` pre-commit hook and the `ci`
-devshell command — refuse before `nix-unit` is reached if anything under the declared roots is
-git-unknown, or is a tracked symlink or submodule whose target the declaration does not also cover. It does **not**
-refuse on tracked-modified, tracked-deleted or staged files: those are fully visible to the
-evaluator with their worktree bytes, and refusing them would reject every commit touching a test
-cell. A hand-typed `nix-unit --flake ./ci#tests` is not guarded.
+So the three invocation points **the harness itself wires** — the `ci` and `ci-error` pre-commit
+hooks and the `ci` devshell command — refuse before `nix-unit` is reached if anything under the
+declared roots is git-unknown, or is a tracked symlink or submodule whose target the declaration
+does not also cover. It does **not** refuse on tracked-modified, tracked-deleted or staged files:
+those are fully visible to the evaluator with their worktree bytes, and refusing them would reject
+every commit touching a test cell. A hand-typed `nix-unit --flake ./ci#tests` is not guarded.
 
-Those two are the harness's own, and they are not the whole set: a consumer's `extraModules` may
-wire further invocation points, which run the guard only if they call it themselves. This
-repository is its own example — `ci/tests-error.nix` adds a third, the `ci-error` hook, on the
-same `\.nix$` trigger, and it does not call the guard.
+Those three are the harness's own, and they are not the whole set: a consumer's `extraModules` may
+wire further invocation points — a runner of its own over some other output, say — and those run
+the guard only if they call it themselves. That is why the count is stated as the harness's rather
+than as the repository's: nothing here can enumerate what a consumer adds.
 
 `testModules` is covered unconditionally, so **most suites declare nothing**. A suite that reads
 outside its collection root — a corpus of documents, a fixture tree beside `ci/` — lists those
@@ -123,9 +123,10 @@ every library in the ecosystem builds its suite from this repository.
 
 Cells whose `expr` **can abort** cannot live in `flake.tests`: the batch asserter behind
 `checks.default` forces every `expr` it finds there, so an aborting one crashes the gate rather than
-failing a cell. They go on a second output, `ci/tests-error.nix`, reached through `extraModules` and
-run by its own hook — whether they assert the abort itself (`expectedError`) or the answer that
-holds only while it does not happen.
+failing a cell. They go on a second output, `flake.testsError` — populated here from
+`ci/tests-error.nix`, reached through `extraModules` — and run by the `ci-error` hook, which the
+harness wires beside `ci` off the same guard. That holds whether they assert the abort itself
+(`expectedError`) or the answer that holds only while it does not happen.
 
 ```
 nix-unit --flake ./ci#tests          # the suites

@@ -19,6 +19,7 @@ let
 in
 let
   tests = config.flake.tests;
+  testsError = config.flake.testsError;
 
   # The base mdformat plugin set, from the one file that states which plugins are members.
   # What each member defends, and why beautysh is not one, are documented there beside the
@@ -63,6 +64,16 @@ in
     type = lib.types.lazyAttrsOf (lib.types.lazyAttrsOf lib.types.raw);
     default = { };
     description = "Test suites: { suite-name.test-name = { expr; expected; }; }";
+  };
+
+  # The second output, declared HERE rather than in each consumer's `ci/tests-error.nix`, for the
+  # reason `readRootsGuard` below is one binary: ten repositories each stating one option is ten
+  # statements that drift, and they had — five carried a description narrowed to
+  # `expectedError`, which is the predicate the `assertTests` comment above says is the wrong one.
+  options.flake.testsError = lib.mkOption {
+    type = lib.types.lazyAttrsOf (lib.types.lazyAttrsOf lib.types.raw);
+    default = { };
+    description = "Test suites whose cells' `expr` CAN ABORT: { suite.test = { expr; expected | expectedError; }; }. Read by `nix-unit --flake ./ci#testsError`; deliberately outside `flake.tests`, which the batch asserter forces every `expr` of and would crash on rather than fail.";
   };
 
   # The EXTENSION point, and it is an extension rather than an override on purpose. The base set
@@ -121,6 +132,19 @@ in
           '';
         };
 
+        # The same runner for the second output. It differs from `ciNixUnit` in the flake
+        # attribute and nothing else — same guard derivation, not a second copy of the check —
+        # because the two planes share one collection root (`ci/tests`), so the SAME untracked
+        # file blinds both and a guard on only one of them reports a green it did not compute.
+        ciNixUnitError = pkgs.writeShellApplication {
+          name = "${name}-ci-nix-unit-error";
+          runtimeInputs = [ (resolve "nix-unit").packages.${system}.default ];
+          text = ''
+            "${readRootsGuard}/bin/${name}-ci-read-roots" || exit $?
+            exec nix-unit --flake ./ci#testsError "$@"
+          '';
+        };
+
         # ★ THE READ-ROOTS GUARD. A suite's evaluator reads a GIT-FILTERED copy of this
         # repository, so a file git does not know about — untracked, or gitignored — is simply
         # absent from the source the cells are collected from and evaluated against. The suite
@@ -129,7 +153,7 @@ in
         # was computed over a tree without it. The run must yield NO VERDICT in that state, which
         # is why this refuses rather than warns.
         #
-        # It is ONE BINARY rather than two copies of a predicate because both wired invocation
+        # It is ONE BINARY rather than a copy per caller because all three wired invocation
         # points below need it, and two statements of one check drift — the guard would then fall
         # behind the thing it guards, which is the same argument `mdformat-plugins-check.nix`
         # takes its `expected` from the installed value for.
@@ -143,9 +167,10 @@ in
             pkgs.coreutils
           ];
           text = ''
-            # The worktree, NAMED rather than assumed: the two call sites run from different
-            # working directories, and a linked worktree must resolve to ITSELF rather than climb
-            # into the main checkout. Same reason treefmt's tree root is a stated command below.
+            # The worktree, NAMED rather than assumed: the three call sites the harness wires run
+            # from different working directories, and a linked worktree must resolve to ITSELF
+            # rather than climb into the main checkout. Same reason treefmt's tree root is a
+            # stated command below.
             if ! wt=$(git rev-parse --show-toplevel 2>&1); then
               printf 'CONTROL FAILED: the read-roots guard is not inside a git worktree: %s\n' "$wt"
               exit 2
@@ -274,6 +299,21 @@ in
               files = "\\.nix$";
               pass_filenames = false;
             };
+            ci-error = {
+              # ★ THE PREDICATE QUANTIFIES AT THE CELL LEVEL, and `testsError != { }` does not.
+              # `flake.testsError` is two levels — `suite.cell` — so a consumer declaring a suite
+              # that holds no cells satisfies the shallower test, gets the hook, and reads
+              # `🎉 0/0 successful` at rc=0: the standing false pass, which is the same defect one
+              # layer out from the one the guard above removes. `lib.all` is wrong at BOTH ends —
+              # vacuously true over no suites, and false for an empty suite sitting beside a
+              # populated one, which would disable a live plane.
+              enable = lib.any (s: s != { }) (lib.attrValues testsError);
+              name = "ci-error";
+              description = "Run nix-unit error-assertion tests";
+              entry = "${ciNixUnitError}/bin/${name}-ci-nix-unit-error";
+              files = "\\.nix$";
+              pass_filenames = false;
+            };
           };
         };
 
@@ -372,10 +412,12 @@ in
               name = "ci";
               help = "Run all checks, or a specific test [ci] [ci suite] [ci suite.test]";
               command = ''
-                # The read-roots guard runs BEFORE nix-unit at both wired invocation points — this
-                # one and the pre-commit hook — because a hole at either is one an author walks
-                # through by habit. `|| exit` rather than relying on `set -e`: this command is not
-                # a `writeShellApplication` and does not inherit its error handling.
+                # The read-roots guard runs BEFORE nix-unit at all three invocation points the
+                # harness itself wires — this one and the two pre-commit hooks — because a hole at
+                # any of them is one an author walks through by habit. A consumer's `extraModules`
+                # may wire further ones, which run the guard only if they call it themselves.
+                # `|| exit` rather than relying on `set -e`: this command is not a
+                # `writeShellApplication` and does not inherit its error handling.
                 #
                 # `cd "$FLAKE_ROOT"` because the guard resolves the tree it checks from the CWD
                 # while nix-unit below is pinned to `$FLAKE_ROOT`. Run from another git worktree
