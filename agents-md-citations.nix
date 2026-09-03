@@ -101,13 +101,31 @@ let
     # quote and the bounded name cover as one. The fifth spelling, `tests = { s = {`, carries the
     # suite on a line of its own and is NOT recognised; that is what the empty-set fallback at the
     # use site is for, and why this returns the set rather than a verdict.
+    #
+    # ★ A SUITE IS DECLARED BY A DECLARATION, NEVER BY A MENTION — which is why DECLRE is anchored
+    # at the LINE START and the name is taken after the LAST dot rather than the first. Left
+    # unanchored, `match()` accepted the path anywhere on the line, so a suite named in a COMMENT
+    # counted as declared and widened SUI. That is the fail-open direction: a wider SUI is exactly
+    # what lets a wrong-suite citation resolve, and this arm is the qualifier's only evidence.
+    # Measured over the 568-file corpus this check reads: 1816 lines carry a match, 0 mid-token,
+    # 4 inside comments across 3 files — and exactly ONE of those changes the set, because the
+    # other two name a suite their own file also declares for real. `gen-scope/ci/tests-error.nix`
+    # declared 17 suites and declares 16: it loses `minting`, whose cells live in `tests/mint.nix`
+    # and which it only ever named in prose. Live consequence 0, and that zero is the result.
+    #
+    # The prefix is a dotted path of WHOLE identifiers rather than a literal `flake.`, because
+    # `config.flake.` is already in the corpus on 18 lines and a spelling this MISSES costs more
+    # than one it admits: a file left with a non-empty but INCOMPLETE set false-REDS a correct
+    # citation, where a file left with an empty one merely falls back to failing open. Whole
+    # identifiers are what keep a line-initial `mytests.s` out on the same reading.
     function suitesof(fl, n,   i, t, out) {
       out = ""
       for (i = 1; i <= n; i++)
         if (match(fl[i], DECLRE)) {
           t = substr(fl[i], RSTART, RLENGTH)
           gsub(/"/, "", t)
-          out = out " " substr(t, index(t, ".") + 1) " "
+          sub(/^.*\./, "", t)
+          out = out " " t " "
         }
       return out
     }
@@ -211,7 +229,7 @@ let
       # lets one boundary serve both recognisers. All three have to stay the same set or a legal
       # cell or binding name becomes unresolvable at its own spelling.
       IDCH     = "[A-Za-z0-9_'-]"
-      DECLRE   = "tests(Error)?\\.\"?[A-Za-z0-9_-]+"
+      DECLRE   = "^[ \t]*([A-Za-z0-9_-]+\\.)*tests(Error)?\\.\"?[A-Za-z0-9_-]+"
       BEGINM   = "<!-- gen-citations:begin -->"
       ENDM     = "<!-- gen-citations:end -->"
 
