@@ -383,6 +383,19 @@ in
           expected = mdformatBase.names;
         };
 
+        # The sheet's CITATIONS are a property of the tree they point into, so the guard is given
+        # the tree rather than a value read out of it. `sourceInfo.outPath` and NOT `outPath`:
+        # under the `?dir=ci` layout every consumer uses, the latter is `<root>/ci`, and the check
+        # would then look for the sheet and the whole suite corpus one directory down.
+        #
+        # There is no opt-out and that is deliberate — a sheet with no region REFUSES. A guard a
+        # writer escapes by not opting in is the fail-open shape this construct exists to close,
+        # and a green from a guard with no subject is invisible.
+        checks.agents-md-citations = import ./agents-md-citations.nix {
+          inherit pkgs name;
+          root = inputs.self.sourceInfo.outPath;
+        };
+
         # The batch gate, built from the asserter above. Its quantifier is `flake.tests` and
         # nothing else, which is the structural reason a cell whose `expr` can abort has to live on
         # another output — a cell asserting an error is the clearest such cell, and one asserting an

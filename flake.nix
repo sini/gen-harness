@@ -48,6 +48,12 @@
     lib.checks.treefmtTreeRoot = import ./treefmt-tree-root.nix;
     lib.checks.mdformatPlugins = import ./mdformat-plugins-check.nix;
 
+    # Unlike its two neighbours this one takes a SOURCE ROOT rather than a built formatter: its
+    # subject is the repository's own tree, so it re-evaluates on any source change. That is the
+    # cost the derivation route buys its eval-time saving with, and it is the first thing to
+    # measure if `nix flake check` gets slower.
+    lib.checks.agentsMdCitations = import ./agents-md-citations.nix;
+
     # `{ names, plugins }` — the membership fact and the `programs.mdformat.plugins` value built
     # from it. Both are published because a consumer that installs the set must also be able to
     # hand its names to the guard, and deriving them at the call site would be a second
