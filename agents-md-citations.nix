@@ -27,7 +27,8 @@
 #
 # ★ WHY A DERIVATION RATHER THAN A `nix-unit` CELL, since the ecosystem binds documents both ways.
 # The route is not the reason; the SUBJECT is. This check's subject is a FILE TREE, not a value: it
-# reads every `.nix` under `ci/`, `tests/` and `lib/` to resolve cell names and count lines. In a
+# reads the whole tracked file list to resolve paths and count lines, and every `.nix` under `ci/`
+# or `tests/` — NOT `lib/` — to resolve cell names. In a
 # pure cell that whole corpus read lands at FLAKE-EVALUATION time, so every consumer's `nix flake
 # show` pays for a documentation guard; in a derivation it lands when the check is BUILT, which is
 # where a guard over a tree belongs. The cost of choosing this, because it is not free: the
@@ -106,7 +107,11 @@ let
       m = 0
       for (i = 1; i <= n; i++) {
         e = parts[i]
-        if (index(e, "-") > 0) { split(e, a, "-"); b = a[2] + 0 } else b = e + 0
+        # HIGHEST, not second: `60-900` and `900-60` name the same two lines, and taking the
+        # second endpoint made the reversed spelling FAIL-OPEN — exit 0, silent, on a range whose
+        # forward form reds. (Three endpoints already red as unclassified, so this is the whole
+        # of it.) Live incidence when it was found: 0 of 107 ranges across the 22 regions.
+        if (index(e, "-") > 0) { split(e, a, "-"); b = (a[1] + 0 > a[2] + 0) ? a[1] + 0 : a[2] + 0 } else b = e + 0
         if (b > m) m = b
       }
       return m
@@ -221,9 +226,20 @@ let
       # ★ THE FAIL-OPEN THIS KEEPS, NAMED AND BOUNDED. A span naming an artefact WITHOUT writing
       # `test-` or `.nix` is read as prose. Widening the candidate predicate to catch it (a `/`,
       # say) sweeps in `./ci#tests` and every path-shaped prose span, which is the
-      # discovered-subject failure the declared region exists to refuse. The guarantee is
+      # discovered-subject failure the declared region exists to refuse.
+      #
+      # STRUCK, and kept legible because it was this hole's stated bound: "the guarantee is
       # therefore: every span inside the region that CLAIMS a citation vocabulary is either
-      # resolved or named. Not: every span is checked.
+      # resolved or named." That is FALSE, and on live spans — `README.md:134`,
+      # `ci/perf-bench.sh:NS`, `/home/sini/.config/git/ignore:22` each name a file that EXISTS and
+      # each read as a coordinate to any human, yet each is filed as prose and is therefore
+      # neither resolved nor named. THE EXCLUDED AXIS IS THE ARTEFACT'S EXTENSION: the candidate
+      # predicate is `test-` or `.nix`, so a citation into a non-`.nix` file is invisible to this
+      # check however citation-shaped it looks.
+      #
+      # The guarantee ranges over CLASSIFIED CITATIONS, not over every span a reader would call
+      # one: every span inside the region that names a `.nix` path or a `test-` cell is either
+      # resolved or named. Not: every span is checked, and not: every citation is checked.
       for (i = B + 1; i < E; i++) {
         s = L[i]
         while (match(s, /`[^`]+`/)) {
