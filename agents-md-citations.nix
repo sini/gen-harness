@@ -361,9 +361,11 @@ let
       # one direction a recogniser over TEXT may take. A file whose suite name sits on a line of
       # its own (`tests = { s = {`) or which carries cells outside any `flake.tests` path is not a
       # file that CONTRADICTS the qualifier; it is a file the scan cannot speak about, and
-      # refusing there would red a legitimate citation. Measured at the landing: 8 of 720 corpus
-      # files carry cell definitions no suite path reaches, `gen-prelude/ci/tests/prelude.nix`
-      # holding 128 of them.
+      # refusing there would red a legitimate citation. Measured over the same 568-file corpus as
+      # above — tracked `.nix` under `ci/` or `tests/`, across the 23 repositories that DECLARE a
+      # region, and NOT the 709 over all 32 gen repositories, which is the population a figure here
+      # drifts into — 12 of those files carry a `test-` LINE, the predicate the loop below applies,
+      # that no declared suite path reaches; `gen-prelude/ci/tests/prelude.nix` holds 136 of them.
       for (i = 1; i <= NNIX && nCellQ > 0; i++) {
         p = ROOT "/" NIXF[i]
         nfl = 0
@@ -419,7 +421,8 @@ pkgs.runCommand "${name}-agents-md-citations" { inherit root; } ''
 
   # ── positive control: the subject exists ──
   # Shape inherited from mdformat-plugins-check.nix: a guard whose subject was removed must say
-  # so rather than pass. gen-harness itself has no AGENTS.md and therefore cannot take this check.
+  # so rather than pass. gen-harness takes this check over its OWN AGENTS.md, so the control has a
+  # live subject in the repository that ships the gate and not only in its consumers.
   if [ ! -s "$sheet" ]; then
     echo "CONTROL FAILED: no non-empty AGENTS.md at $sheet; this check has no subject." >&2
     echo "If the sheet was deliberately removed, remove this check with it." >&2

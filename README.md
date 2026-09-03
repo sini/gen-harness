@@ -113,8 +113,10 @@ exists to cut. A library taking this route needs `gen-prelude` declared at its *
 
 `ci/` is a separate flake. It hosts the harness's own suites, and it is where the ecosystem's
 cross-library integration suites — the ones whose subject is a pairing rather than a single library,
-and which therefore have no honest home in either library's own repository — **will** live. None has
-moved yet: `ci/tests/` holds three suites today and all three are about the harness.
+and which therefore have no honest home in either library's own repository — live. The first has
+moved: of the four suites `nix eval ./ci#tests --apply builtins.attrNames` names today, three are
+about the harness and `dispatch-select-adapter` is the gen-dispatch × gen-select pairing, which
+declares both siblings as this flake's own inputs rather than either library's.
 
 It reaches `mkCi` through `root.url = "path:.."`: the harness tests itself with itself. The
 consequence is stated rather than hidden — a change that stops `mkCi` evaluating takes its own
