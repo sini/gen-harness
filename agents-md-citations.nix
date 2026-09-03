@@ -69,20 +69,20 @@ let
 
     function hasname(f, nm,   p, l, got) {
       p = ROOT "/" f; got = 0
-      while ((getline l < p) > 0) if (index(l, nm) > 0) { got = 1; break }
+      while ((getline l < p) > 0) if (wholeword(l, nm)) { got = 1; break }
       close(p)
       return got
     }
 
-    # ★ A CELL NAME RESOLVES AS A WHOLE IDENTIFIER, NEVER AS A SUBSTRING. `index()` answers "does
-    # this line contain these characters", which is a different question from "does this line
-    # name this cell": `test-foo` is a substring of `test-foo-bar`, so a citation that is
-    # truncated, renamed-by-suffix or commented out resolved against the cell that REPLACED it —
+    # ★ A CITED NAME RESOLVES AS A WHOLE IDENTIFIER, NEVER AS A SUBSTRING — a cell and a binding
+    # anchor alike, which is why this is one predicate and not two. `index()` answers "does this
+    # line contain these characters", a different question from "does this line name this thing":
+    # `test-foo` is a substring of `test-foo-bar` and `strip` of `strips`, so a citation that is
+    # truncated, renamed-by-suffix or commented out resolved against the name that REPLACED it —
     # the exact drift this check exists to catch, surviving in the one shape it cannot announce.
-    # Cell names run over the CELLRE alphabet, so an occurrence bounded on both sides by
-    # something outside that alphabet is the name itself and not a fragment of a longer one. The
-    # ends of the line count as boundaries, which is why the empty string is tested against IDCH
-    # rather than special-cased.
+    # An occurrence bounded on both sides by something outside the name's own alphabet is the
+    # name itself and not a fragment of a longer one. The ends of the line count as boundaries,
+    # which is why the empty string is tested against IDCH rather than special-cased.
     function wholeword(l, nm,   o, k, before, after) {
       o = 1
       while ((k = index(substr(l, o), nm)) > 0) {
@@ -206,9 +206,10 @@ let
       COORDRE  = "^" PATHRE ":[0-9]+(-[0-9]+)?$"
       ANCHORRE = "^" PATHRE ":[A-Za-z_'][A-Za-z0-9_'-]*$"
       LISTRE   = "^" PATHRE ":[0-9]+(-[0-9]+)?(, ?[0-9]+(-[0-9]+)?)+$"
-      # The cell alphabet, as a one-character class: the boundary `wholeword` reads. It is CELLRE's
-      # own trailing class, and the two have to stay the same set or a legal cell name becomes
-      # unresolvable at its own spelling.
+      # The name alphabet, as a one-character class: the boundary `wholeword` reads. It is
+      # CELLRE's own trailing class and ANCHORRE's, and those are the SAME set — which is what
+      # lets one boundary serve both recognisers. All three have to stay the same set or a legal
+      # cell or binding name becomes unresolvable at its own spelling.
       IDCH     = "[A-Za-z0-9_'-]"
       DECLRE   = "tests(Error)?\\.\"?[A-Za-z0-9_-]+"
       BEGINM   = "<!-- gen-citations:begin -->"
