@@ -74,6 +74,44 @@ let
       return got
     }
 
+    # ★ A CELL NAME RESOLVES AS A WHOLE IDENTIFIER, NEVER AS A SUBSTRING. `index()` answers "does
+    # this line contain these characters", which is a different question from "does this line
+    # name this cell": `test-foo` is a substring of `test-foo-bar`, so a citation that is
+    # truncated, renamed-by-suffix or commented out resolved against the cell that REPLACED it —
+    # the exact drift this check exists to catch, surviving in the one shape it cannot announce.
+    # Cell names run over the CELLRE alphabet, so an occurrence bounded on both sides by
+    # something outside that alphabet is the name itself and not a fragment of a longer one. The
+    # ends of the line count as boundaries, which is why the empty string is tested against IDCH
+    # rather than special-cased.
+    function wholeword(l, nm,   o, k, before, after) {
+      o = 1
+      while ((k = index(substr(l, o), nm)) > 0) {
+        k += o - 1
+        before = (k > 1) ? substr(l, k - 1, 1) : ""
+        after = substr(l, k + length(nm), 1)
+        if (before !~ IDCH && after !~ IDCH) return 1
+        o = k + 1
+      }
+      return 0
+    }
+
+    # The suite names a file DECLARES, as a space-fenced string for membership testing. A suite is
+    # an attribute under `flake.tests` or `flake.testsError`, and the corpus writes that path four
+    # ways — `tests.s.test-x`, `tests.s = {`, `tests."s" = {`, `testsError.s` — which the optional
+    # quote and the bounded name cover as one. The fifth spelling, `tests = { s = {`, carries the
+    # suite on a line of its own and is NOT recognised; that is what the empty-set fallback at the
+    # use site is for, and why this returns the set rather than a verdict.
+    function suitesof(fl, n,   i, t, out) {
+      out = ""
+      for (i = 1; i <= n; i++)
+        if (match(fl[i], DECLRE)) {
+          t = substr(fl[i], RSTART, RLENGTH)
+          gsub(/"/, "", t)
+          out = out " " substr(t, index(t, ".") + 1) " "
+        }
+      return out
+    }
+
     # ★ EXACT-FIRST, THEN SUFFIX, AND THE SUFFIX HALF IS FAIL-CLOSED. Suffix resolution is what
     # lets a bare `x.nix` resolve inside a section that names its directory, and it is NOT a
     # function: `flake.nix`, `default.nix` and `carrier.nix` routinely answer to two or three
@@ -168,6 +206,11 @@ let
       COORDRE  = "^" PATHRE ":[0-9]+(-[0-9]+)?$"
       ANCHORRE = "^" PATHRE ":[A-Za-z_'][A-Za-z0-9_'-]*$"
       LISTRE   = "^" PATHRE ":[0-9]+(-[0-9]+)?(, ?[0-9]+(-[0-9]+)?)+$"
+      # The cell alphabet, as a one-character class: the boundary `wholeword` reads. It is CELLRE's
+      # own trailing class, and the two have to stay the same set or a legal cell name becomes
+      # unresolvable at its own spelling.
+      IDCH     = "[A-Za-z0-9_'-]"
+      DECLRE   = "tests(Error)?\\.\"?[A-Za-z0-9_-]+"
       BEGINM   = "<!-- gen-citations:begin -->"
       ENDM     = "<!-- gen-citations:end -->"
 
@@ -246,10 +289,17 @@ let
           span = substr(s, RSTART + 1, RLENGTH - 2)
           s = substr(s, RSTART + RLENGTH)
 
+          # ★ THE QUEUE IS KEYED ON THE SPAN, NOT THE BARE CELL. `a.test-x` and `b.test-x` are two
+          # different claims, and keying on the cell collapsed them into one verdict — whichever
+          # was cited first decided both.
           if (span ~ CELLRE) {
             nCells++
-            p = index(span, "."); cell = (p > 0) ? substr(span, p + 1) : span
-            if (!(cell in CELLSEEN)) { CELLSEEN[cell] = 1; CELLQ[++nCellQ] = cell; CELLSPAN[cell] = span }
+            if (!(span in CELLSEEN)) {
+              CELLSEEN[span] = 1; CELLQ[++nCellQ] = span
+              p = index(span, ".")
+              CELLNAME[span] = (p > 0) ? substr(span, p + 1) : span
+              CELLSUITE[span] = (p > 0) ? substr(span, 1, p - 1) : ""
+            }
           }
           else if (span ~ FILERE) {
             nFiles++
@@ -280,21 +330,50 @@ let
       if (nCellQ > 0 && NNIX == 0)
         die("CONTROL FAILED: the region names test cell(s) but no suite corpus exists to resolve them")
 
-      # One pass over the suite corpus, resolving every cited cell by occurrence.
+      # One pass over the suite corpus, resolving every cited cell WHOLE and — where the citation
+      # qualifies it — IN THE SUITE IT NAMES.
+      #
+      # ★ THE QUALIFIER IS A CLAIM, NOT DECORATION. `suite.cell` says the cell lives in THAT
+      # suite, so resolving only the cell half made the suite half unfalsifiable: a citation that
+      # named the wrong suite for a real cell read green, and the re-anchoring shape this construct
+      # is built for — a row following a suite that moved — is exactly the drift that produces.
+      #
+      # ★ AND THE GATE FAILS OPEN ON A FILE THAT DECLARES NO SUITE THIS SCAN CAN SEE, which is the
+      # one direction a recogniser over TEXT may take. A file whose suite name sits on a line of
+      # its own (`tests = { s = {`) or which carries cells outside any `flake.tests` path is not a
+      # file that CONTRADICTS the qualifier; it is a file the scan cannot speak about, and
+      # refusing there would red a legitimate citation. Measured at the landing: 8 of 720 corpus
+      # files carry cell definitions no suite path reaches, `gen-prelude/ci/tests/prelude.nix`
+      # holding 128 of them.
       for (i = 1; i <= NNIX && nCellQ > 0; i++) {
         p = ROOT "/" NIXF[i]
-        while ((getline l < p) > 0) {
-          if (index(l, "test-") == 0) continue
-          for (j = 1; j <= nCellQ; j++) if (!(CELLQ[j] in FOUND) && index(l, CELLQ[j]) > 0) FOUND[CELLQ[j]] = 1
-        }
+        nfl = 0
+        while ((getline l < p) > 0) FL[++nfl] = l
         close(p)
+        SUI = suitesof(FL, nfl)
+        for (k = 1; k <= nfl; k++) {
+          if (index(FL[k], "test-") == 0) continue
+          for (j = 1; j <= nCellQ; j++) {
+            if (CELLQ[j] in FOUND) continue
+            if (!wholeword(FL[k], CELLNAME[CELLQ[j]])) continue
+            FOUNDANY[CELLQ[j]] = 1
+            cs = CELLSUITE[CELLQ[j]]
+            if (cs == "" || SUI == "" || index(SUI, " " cs " ") > 0) FOUND[CELLQ[j]] = 1
+          }
+        }
       }
-      for (j = 1; j <= nCellQ; j++) if (!(CELLQ[j] in FOUND)) badCells[++nBadCe] = CELLSPAN[CELLQ[j]]
+      # Two dispositions, because they are two repairs: a cell nothing defines is a dead citation,
+      # and a cell its own suite does not define is a citation that followed the code only halfway.
+      for (j = 1; j <= nCellQ; j++) {
+        if (CELLQ[j] in FOUND) continue
+        if (CELLQ[j] in FOUNDANY) badSuites[++nBadSu] = CELLQ[j]
+        else badCells[++nBadCe] = CELLQ[j]
+      }
 
       summary = "cells=" nCells+0 " files=" nFiles+0 " coords=" nCoords+0 " anchors=" nAnchors+0 \
                 " list=" nList+0 " family=" nFamily+0 " prose=" nProse+0 " unclassified=" nUnc+0
 
-      if (nBadCe + nBadF + nBadC + nBadA + nUnc == 0) {
+      if (nBadCe + nBadSu + nBadF + nBadC + nBadA + nUnc == 0) {
         print "── " NAME "-agents-md-citations ──"
         print "region declared; " summary
         exit 0
@@ -304,6 +383,7 @@ let
       for (j = 1; j <= nUnc; j++)
         print "CITATION UNCLASSIFIED -- inside the region, names test- or .nix, matches no citation shape: " unc[j] > "/dev/stderr"
       if (nBadCe) print "CITATION DRIFT -- cells no suite defines: " join(badCells, nBadCe) > "/dev/stderr"
+      if (nBadSu) print "CITATION DRIFT -- cells the cited suite does not define: " join(badSuites, nBadSu) > "/dev/stderr"
       if (nBadF)  print "CITATION DRIFT -- files that do not exist: " join(badFiles, nBadF) > "/dev/stderr"
       if (nBadC)  print "CITATION DRIFT -- coordinates that do not resolve: " join(badCoords, nBadC) > "/dev/stderr"
       if (nBadA)  print "CITATION DRIFT -- binding anchors that do not resolve: " join(badAnchors, nBadA) > "/dev/stderr"
