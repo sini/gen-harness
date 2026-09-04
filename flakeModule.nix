@@ -407,7 +407,29 @@ in
         '';
 
         devshells.default = {
-          devshell.startup.git-hooks.text = config.pre-commit.installationScript;
+          # The installer's LAST ACT writes `core.hooksPath` RELATIVE to the working-tree top-level
+          # (git-hooks.nix's `installationScript` strips `$GIT_WC/` off the absolute common dir). Git
+          # resolves a relative value against the top-level, and in a LINKED WORKTREE that is the
+          # worktree, whose `.git` is a POINTER FILE — so `.git/hooks` names nothing, git finds no
+          # hooks and runs none, REPORTING NOTHING. The commit then succeeds ungated. This is the
+          # same worktree fact `projectRootFile = null` above exists for, on the hook path instead of
+          # the tree-root path.
+          #
+          # REMOVED rather than corrected to an absolute path: git's own default already resolves
+          # hooks to the common dir in every worktree, so the setting is redundant where it works and
+          # wrong where it does not. Deletion leaves no value to maintain and nothing to break when a
+          # checkout moves.
+          #
+          # ANNOUNCED because `--unset-all` distinguishes REMOVED (0) from ABSENT (5), and a setting
+          # that disappears without saying so is the defect class this line exists to close.
+          # The `if` form rather than `|| true`: the removal's exit status is the condition, so it is
+          # read rather than discarded, and it is safe under `set -e`.
+          devshell.startup.git-hooks.text = ''
+            ${config.pre-commit.installationScript}
+            if ${lib.getExe config.pre-commit.settings.gitPackage} config --local --unset-all core.hooksPath; then
+              echo 1>&2 "gen-harness: removed core.hooksPath - git's default already resolves hooks to the common dir, and the relative value the installer writes is unreachable from a linked worktree."
+            fi
+          '';
 
           packages = [
             (resolve "nix-unit").packages.${system}.default
