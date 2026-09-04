@@ -344,6 +344,27 @@ let
         }
       }
 
+      # ── control: the region carries at least one CLASSIFIED citation ──
+      # A region declaring itself and asserting nothing is a green over an empty domain — the same
+      # vacuous pass the sheet-level control above refuses, one scope in. `family` and `prose` are
+      # excluded deliberately: `family` is the RESIDUAL disposition, so counting it would let a
+      # region satisfy the rule with a code fragment (one live region's entire `family` is the Nix
+      # lambda `_: [ ]`).
+      #
+      # ★ THE `nUnc` CONJUNCT IS AN ORDERING, NOT AN EXEMPTION. A region whose only
+      # citation-shaped spans are UNCLASSIFIED already reds, with the span NAMED — and `die` here
+      # would preempt the summary, the named span and the repair alike, replacing a true and
+      # actionable diagnostic with a message that is false on that input. `classified == 0` is
+      # compatible with no other drift disposition, because each forces a classified counter above
+      # zero by construction: badFiles ⇒ nFiles > 0, badCoords ⇒ nCoords + nList > 0,
+      # badAnchors ⇒ nAnchors > 0, badCells and badSuites ⇒ nCells > 0. So this is one conjunct
+      # and not a class, and the verdict is exit 1 either way — what it decides is which of two
+      # true things the operator is told.
+      classified = nCells + nFiles + nCoords + nAnchors + nList
+      if (classified == 0 && nUnc == 0)
+        die("CONTROL FAILED: the declared region carries no classified citation (cells=0 files=0 " \
+            "coords=0 anchors=0 list=0); it asserts nothing this guard can check")
+
       # ── control: cells are cited, so a suite corpus must exist to resolve them against ──
       # Without this every cell reads as dangling and the count is an artefact of a missing tree.
       if (nCellQ > 0 && NNIX == 0)
