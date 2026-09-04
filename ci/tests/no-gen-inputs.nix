@@ -1,15 +1,20 @@
-# THE HARNESS DECLARES NO GEN LIBRARY INPUT — read from the lock, which is where a consumer's
-# copy of this dependency set comes from.
+# THE HARNESS DECLARES NO GEN LIBRARY INPUT.
 #
 # This is the property the repository exists to hold: a library's test harness must not pull the
 # aggregator that pins the library, and it must not pull a library its consumer also pins, or the
-# consumer evaluates two builds of one library. Flake text would be the weaker instrument — an
-# input reached transitively appears in no `.url` line — so the subject is `flake.lock`'s node set.
+# consumer evaluates two builds of one library.
 #
-# The locks are read by relative path rather than through the `root` input: the input's copy is a
-# snapshot taken when ci's lock was last updated, so a gen input added to the root flake today
-# would be invisible to a suite reading the snapshot until someone advanced the pin. The scan must
-# see the tree it is run on.
+# TWO SUBJECTS HERE, AND THEY TAKE DIFFERENT SOURCES. The closure cells ask what a consumer's copy
+# of this dependency set CONTAINS; an input reached transitively appears in no `.url` line, so only
+# a lock expresses that and the lock is properly their subject. The tool-set cell asks what this
+# repository DECLARES, which is a fact about `flake.nix` — a lock records what resolution PRODUCED,
+# and the two can differ. Reading the lock for it let a CI artefact set the population of a check
+# on the library; ci exists in service of the libraries, so that one reads the declaration.
+#
+# Both are read by relative path rather than through the `root` input: the input's copy is a
+# snapshot taken when ci's lock was last updated, so an input added to the root flake today would
+# be invisible to a suite reading the snapshot until someone advanced the pin. The scan must see
+# the tree it is run on.
 { lib, ... }:
 let
   rootLock = builtins.fromJSON (builtins.readFile ../../flake.lock);
@@ -25,7 +30,9 @@ let
       )
     );
 
-  toolInputs = lib.sort (a: b: a < b) (lib.attrNames rootLock.nodes.root.inputs);
+  # The header's second subject: what the root flake DECLARES. `import` rather than a text scan —
+  # the declaration is an expression, and `attrNames` over it is the whole statement.
+  toolInputs = lib.sort (a: b: a < b) (lib.attrNames (import ../../flake.nix).inputs);
 in
 {
   flake.tests.no-gen-inputs = {
