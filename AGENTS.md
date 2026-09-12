@@ -1,5 +1,7 @@
 # gen-harness — agent capability sheet
 
+> **Library class: instrumental.** Deletion is decided on fitness for purpose, and — unlike a reference-grade library — a usage count is admissible: if nothing is built from this repository, it has no purpose.
+
 ## Scope
 
 The CI harness every gen ecosystem library's `ci/flake.nix` is built from: `mkCi` wires flake-parts,
