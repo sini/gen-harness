@@ -396,6 +396,18 @@ in
           root = inputs.self.sourceInfo.outPath;
         };
 
+        # A repository that DECLARES an error plane (`ci/tests-error.nix`) must RUN it from a
+        # workflow step, in both directions — a step with no plane file is the same defect seen
+        # from the other side. Same root binding and the same no-opt-out as the sheet check above:
+        # a non-declarer is green by construction, so there is nothing for it to opt out of, and a
+        # declarer that could opt out would be the fail-open shape the check exists to close. The
+        # evaluated `testsError` is the sibling output, handed in for the one cell whose unit is
+        # collected cells rather than text.
+        checks.ci-plane-coverage = import ./ci-plane-coverage.nix {
+          inherit pkgs name testsError;
+          root = inputs.self.sourceInfo.outPath;
+        };
+
         # The batch gate, built from the asserter above. Its quantifier is `flake.tests` and
         # nothing else, which is the structural reason a cell whose `expr` can abort has to live on
         # another output — a cell asserting an error is the clearest such cell, and one asserting an
