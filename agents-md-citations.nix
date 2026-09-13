@@ -47,6 +47,13 @@
   # would both be looked for one directory down and the whole check would resolve nothing.
   # `readroots.nix` states the same ground for the same reason.
   root,
+  # The consumer's DECLARED SHEET OBLIGATION, out of band from the file. "owed" (the default, and
+  # the invariant: absence of a declaration yields the refusing arm) means a non-empty AGENTS.md
+  # must exist and its region must pass; "not-owed" means NO entry named AGENTS.md may exist at
+  # the repository root (a file empty or not, a symlink live or dangling, a directory), and the
+  # check reads that declaration as its subject. There is no third value and no silent arm: a
+  # declaration the tree contradicts is refused in both directions.
+  sheet ? "owed",
 }:
 let
   # The classifier lives in its own store path rather than a heredoc inside the builder: a heredoc
@@ -437,27 +444,56 @@ let
     }
   '';
 in
-pkgs.runCommand "${name}-agents-md-citations" { inherit root; } ''
-  sheet="$root/AGENTS.md"
+# A third value is refused at EVALUATION, before any derivation exists: the direct route has no
+# module type in front of it, so the builder states the admitted values itself.
+if sheet != "owed" && sheet != "not-owed" then
+  throw "agents-md-citations: `sheet` must be \"owed\" or \"not-owed\"; got ${builtins.toJSON sheet}"
+else
+  pkgs.runCommand "${name}-agents-md-citations"
+    {
+      inherit root;
+      sheetDeclared = sheet;
+    }
+    ''
+      sheet="$root/AGENTS.md"
 
-  # ── positive control: the subject exists ──
-  # Shape inherited from mdformat-plugins-check.nix: a guard whose subject was removed must say
-  # so rather than pass. gen-harness takes this check over its OWN AGENTS.md, so the control has a
-  # live subject in the repository that ships the gate and not only in its consumers.
-  if [ ! -s "$sheet" ]; then
-    echo "CONTROL FAILED: no non-empty AGENTS.md at $sheet; this check has no subject." >&2
-    echo "If the sheet was deliberately removed, remove this check with it." >&2
-    exit 1
-  fi
+      # ── the domain: what the consumer DECLARED, read before the file is ──
+      # A not-owed declaration is a positive subject, not an opt-out: the check reads it and refuses
+      # when the tree contradicts it, so neither direction can be left silently.
+      if [ "$sheetDeclared" = not-owed ]; then
+        # -e follows a symlink and reports the TARGET, so a dangling link named AGENTS.md would read
+        # as absent; it is still an entry in the tree, so -L is the second arm.
+        if [ -e "$sheet" ] || [ -L "$sheet" ]; then
+          echo "CONTROL FAILED: the consumer declares its AGENTS.md sheet not-owed, yet $sheet exists; the declaration and the tree contradict each other." >&2
+          echo "Either delete the sheet, or drop the not-owed declaration (gen.ci.agentsMd.sheet for an mkCi consumer; the sheet argument for a direct consumer)." >&2
+          exit 1
+        fi
+        echo "sheet declared not-owed and none is present; the check's subject here is that declaration, and it holds."
+        touch $out
+        exit 0
+      fi
 
-  # The corpus is the SOURCE as the flake sees it, so it is exactly the tracked tree — no git in
-  # the sandbox, and no untracked file can make a citation resolve that a fresh clone would red.
-  ( cd "$root" && find . -type f | sed 's|^\./||' | sort ) > "$TMPDIR/files"
-  grep -E '(^|/)(ci|tests)/' "$TMPDIR/files" | grep '\.nix$' > "$TMPDIR/nix" || true
+      # ── positive control: the subject exists ──
+      # Shape inherited from mdformat-plugins-check.nix: a guard whose subject was removed must say
+      # so rather than pass. gen-harness takes this check over its OWN AGENTS.md, so the control has a
+      # live subject in the repository that ships the gate and not only in its consumers. The remedy
+      # names BOTH executable repairs; the removal sentence is scoped to a direct consumer, the only
+      # one that can execute it -- an mkCi consumer has no handle on the check's wiring.
+      if [ ! -s "$sheet" ]; then
+        echo "CONTROL FAILED: no non-empty AGENTS.md at $sheet; this check has no subject." >&2
+        echo "Either write the sheet, or -- if this repository owes none -- declare it: gen.ci.agentsMd.sheet = \"not-owed\" for an mkCi consumer, sheet = \"not-owed\" for a direct lib.checks.agentsMdCitations consumer." >&2
+        echo "A direct consumer that deliberately removed its sheet may instead remove this check with it." >&2
+        exit 1
+      fi
 
-  awk -v ROOT="$root" -v NAME="${name}" -v SHEET="$sheet" \
-      -v FILELIST="$TMPDIR/files" -v NIXLIST="$TMPDIR/nix" \
-      -f ${classify} < /dev/null || exit 1
+      # The corpus is the SOURCE as the flake sees it, so it is exactly the tracked tree — no git in
+      # the sandbox, and no untracked file can make a citation resolve that a fresh clone would red.
+      ( cd "$root" && find . -type f | sed 's|^\./||' | sort ) > "$TMPDIR/files"
+      grep -E '(^|/)(ci|tests)/' "$TMPDIR/files" | grep '\.nix$' > "$TMPDIR/nix" || true
 
-  touch $out
-''
+      awk -v ROOT="$root" -v NAME="${name}" -v SHEET="$sheet" \
+          -v FILELIST="$TMPDIR/files" -v NIXLIST="$TMPDIR/nix" \
+          -f ${classify} < /dev/null || exit 1
+
+      touch $out
+    ''

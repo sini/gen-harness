@@ -52,7 +52,10 @@ the harness plus the tools, with no library it did not ask for.
 
 A test module sets `flake.tests.<suite>.<name> = { expr; expected; };` and receives `name`,
 `genInputs`, `genPrelude` and whatever `specialArgs` adds. Suites run under
-`nix-unit --flake ./ci#tests`.
+`nix-unit --flake ./ci#tests`. A consumer that owes no `AGENTS.md` capability sheet declares it
+through `extraModules` as `{ gen.ci.agentsMd.sheet = "not-owed"; }`; the `agents-md-citations`
+check then holds the tree to that declaration and refuses a sheet present beside it, while a
+consumer that declares nothing owes a sheet and is refused without one.
 
 ### The declared read domain
 

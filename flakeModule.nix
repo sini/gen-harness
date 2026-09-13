@@ -34,6 +34,8 @@ let
   mdformatBasePlugins = mdformatBase.plugins;
   # Bound HERE rather than inside `perSystem`, whose own `config` argument shadows this one.
   mdformatExtra = config.gen.ci.mdformat.extraPlugins;
+  # Bound HERE for the same reason as `mdformatExtra` above: `perSystem`'s own `config` shadows.
+  sheetDeclared = config.gen.ci.agentsMd.sheet;
 
   # KNOWN LIMIT, and it belongs to this gate rather than to the suites it reads: `expr` is forced
   # for every cell unconditionally, so a cell whose `expr` ABORTS crashes the check instead of
@@ -89,6 +91,24 @@ in
       extends, so a consumer setting it directly would silently drop every base member and
       nothing would report it. Which plugins are in the base set, and what each one defends,
       is stated in `mdformat-plugins.nix` and nowhere else.
+    '';
+  };
+
+  # The consumer's DECLARED SHEET OBLIGATION. The default is the invariant -- a consumer that
+  # says nothing owes a sheet and is refused without one -- so absence yields the refusing arm,
+  # never its negation. "not-owed" is a positive declaration the check reads and holds the tree
+  # to: a sheet present beside it is refused as a contradiction. There is no value that turns
+  # the check off over a sheet that exists.
+  options.gen.ci.agentsMd.sheet = lib.mkOption {
+    type = lib.types.enum [
+      "owed"
+      "not-owed"
+    ];
+    default = "owed";
+    description = ''
+      Whether this repository owes an AGENTS.md capability sheet. `owed`: a non-empty sheet
+      with a passing citation region is required. `not-owed`: no entry named AGENTS.md may
+      exist at the repository root, and that declaration is the check's subject.
     '';
   };
 
@@ -388,12 +408,16 @@ in
         # under the `?dir=ci` layout every consumer uses, the latter is `<root>/ci`, and the check
         # would then look for the sheet and the whole suite corpus one directory down.
         #
-        # There is no opt-out and that is deliberate — a sheet with no region REFUSES. A guard a
-        # writer escapes by not opting in is the fail-open shape this construct exists to close,
-        # and a green from a guard with no subject is invisible.
+        # There is no opt-out BY SILENCE, and that is deliberate — a sheet with no region REFUSES,
+        # and so does a consumer with no sheet that has not said so: it declares
+        # `gen.ci.agentsMd.sheet = "not-owed"` in its own flake or is refused, and a sheet present
+        # beside that declaration is refused too. A guard a writer escapes by not opting in is the
+        # fail-open shape this construct exists to close, and a green from a guard with no subject
+        # is invisible — the not-owed green names its subject, the declaration, in the build log.
         checks.agents-md-citations = import ./agents-md-citations.nix {
           inherit pkgs name;
           root = inputs.self.sourceInfo.outPath;
+          sheet = sheetDeclared;
         };
 
         # A repository that DECLARES an error plane (`ci/tests-error.nix`) must RUN it from a
