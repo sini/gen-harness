@@ -54,6 +54,12 @@
     # measure if `nix flake check` gets slower.
     lib.checks.agentsMdCitations = import ./agents-md-citations.nix;
 
+    # A source root again, plus the flake's own evaluated `testsError` — the one input the reader
+    # cannot produce from text. Published for the same non-mkCi consumer as its neighbours: the
+    # hub declares an error plane and runs it from a workflow, and is gated on that like every
+    # consumer the flake module installs this check into.
+    lib.checks.ciPlaneCoverage = import ./ci-plane-coverage.nix;
+
     # `{ names, plugins }` — the membership fact and the `programs.mdformat.plugins` value built
     # from it. Both are published because a consumer that installs the set must also be able to
     # hand its names to the guard, and deriving them at the call site would be a second
