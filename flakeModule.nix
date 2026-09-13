@@ -108,7 +108,9 @@ in
     description = ''
       Whether this repository owes an AGENTS.md capability sheet. `owed`: a non-empty sheet
       with a passing citation region is required. `not-owed`: no entry named AGENTS.md may
-      exist at the repository root, and that declaration is the check's subject.
+      exist at the repository root, and that declaration is the check's subject. Declare it in
+      the same commit as the harness bump that brings this option: a declaration ahead of its
+      bump is an undefined option and fails every output of this ci at evaluation, `tests` too.
     '';
   };
 
@@ -422,7 +424,8 @@ in
 
         # A repository that DECLARES an error plane (`ci/tests-error.nix`) must RUN it from a
         # workflow step, in both directions — a step with no plane file is the same defect seen
-        # from the other side. Same root binding and the same no-opt-out as the sheet check above:
+        # from the other side. Same root binding as the sheet check above, and the same refusal of
+        # a SILENT opt-out:
         # a non-declarer is green by construction, so there is nothing for it to opt out of, and a
         # declarer that could opt out would be the fail-open shape the check exists to close. The
         # evaluated `testsError` is the sibling output, handed in for the one cell whose unit is

@@ -56,8 +56,9 @@
 
     # A source root again, plus the flake's own evaluated `testsError` — the one input the reader
     # cannot produce from text. Published for the same non-mkCi consumer as its neighbours: the
-    # hub declares an error plane and runs it from a workflow, and is gated on that like every
-    # consumer the flake module installs this check into.
+    # hub reaches the harness gates through `lib.checks` and not the flake module, so this is the
+    # only route by which it can be gated like every mkCi consumer once it wires the check. Today
+    # the hub carries no `ci/tests-error.nix` and this check classifies its tree `no-plane`.
     lib.checks.ciPlaneCoverage = import ./ci-plane-coverage.nix;
 
     # `{ names, plugins }` — the membership fact and the `programs.mdformat.plugins` value built
