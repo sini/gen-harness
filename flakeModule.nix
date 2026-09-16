@@ -468,6 +468,60 @@ in
             if ${lib.getExe config.pre-commit.settings.gitPackage} config --local --unset-all core.hooksPath; then
               echo 1>&2 "gen-harness: removed core.hooksPath - git's default already resolves hooks to the common dir, and the relative value the installer writes is unreachable from a linked worktree."
             fi
+
+            # A LINKED WORKTREE'S .pre-commit-config.yaml IS NEVER WRITTEN: the installer above only
+            # ever runs inside the checkout that entered THIS devshell, and `git worktree add` never
+            # enters one. With core.hooksPath correctly unset (above), the shared hook DOES reach the
+            # worktree -- finds no config -- and ABORTS every commit there. Loud, not silent, but it
+            # blocks every legitimate worktree commit until someone remembers a manual `nix develop`.
+            # Written at the COMMON dir because worktrees SHARE hooks; there is only one slot to fill.
+            #
+            # `post-checkout` is a slot NO CONSUMER CONFIGURES TODAY (census: 0 of 31 `mkCi`
+            # consumers declare a `post-checkout` stage) -- not, as first drafted, a slot upstream
+            # never writes to: its own uninstall loop and install switch both name this exact slot
+            # (git-hooks.nix modules/supported-hooks.nix), so the first consumer that configures one
+            # would have this hook clobbered, written after `installationScript` in the same string.
+            # The `# gen-harness` line inside the written hook below is this file naming itself, the
+            # same way upstream's own uninstall discriminates its hooks from foreign ones.
+            #
+            # GUARDED against running with no repository at all underfoot (a tarball checkout, a
+            # sandboxed build, any non-repo cwd): unguarded, `git rev-parse --git-common-dir` fails
+            # loud, and under the devshell entrypoint's `set -euo pipefail` that ABORTS DEVSHELL ENTRY
+            # OUTRIGHT rather than merely skipping this block.
+            if common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
+              # WRITTEN VIA mktemp + `mv -f`, NEVER `cat >` DIRECTLY ONTO THE HOOK PATH: this hook is
+              # what invokes `nix develop` in the first place, so a direct overwrite truncates and
+              # rewrites the very file the running interpreter is mid-way through reading -- bash
+              # resumes at a stale byte offset into different text the moment a checked-out branch
+              # carries a longer or shorter version of this block than the one already running. A
+              # same-directory rename swaps the inode instead, leaving the running read untouched.
+              tmp=$(mktemp "$common_dir/hooks/.post-checkout.XXXXXX")
+              cat > "$tmp" <<'POSTCHECKOUT'
+            #!/usr/bin/env bash
+            # gen-harness: materialises a linked worktree's pre-commit config on checkout.
+            set -uo pipefail
+            common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
+            git_dir=$(git rev-parse --path-format=absolute --git-dir)
+            toplevel=$(git rev-parse --show-toplevel)
+            # Ordinary checkout in the MAIN tree: git-dir already IS the common dir. Nothing to do.
+            if [ "$git_dir" = "$common_dir" ]; then exit 0; fi
+            # Already provisioned (a later checkout inside an already-materialised worktree): no-op.
+            if [ -e "$toplevel/.pre-commit-config.yaml" ]; then exit 0; fi
+            # Not (or not yet, on this branch) an mkCi consumer: nothing this hook can provision.
+            if [ -f "$toplevel/ci/flake.nix" ]; then
+              echo "post-checkout: materialising .pre-commit-config.yaml for linked worktree $toplevel" >&2
+              # GUARDED: `git worktree add` has already created and registered the worktree by the
+              # time this hook runs, so a provisioning failure must only warn, not fail the primitive
+              # git operation that is already done.
+              if ! ( cd "$toplevel/ci" && nix develop -c true ); then
+                echo "post-checkout: FAILED to provision the pre-commit config for $toplevel -- enter its ci devshell by hand before committing" >&2
+              fi
+            fi
+            exit 0
+            POSTCHECKOUT
+              chmod +x "$tmp"
+              mv -f "$tmp" "$common_dir/hooks/post-checkout"
+            fi
           '';
 
           packages = [
