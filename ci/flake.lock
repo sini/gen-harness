@@ -3,7 +3,7 @@
     "devshell": {
       "inputs": {
         "nixpkgs": [
-          "root",
+          "gen-harness",
           "nixpkgs"
         ]
       },
@@ -103,6 +103,27 @@
         "type": "github"
       }
     },
+    "gen-harness": {
+      "inputs": {
+        "devshell": "devshell",
+        "flake-parts": "flake-parts",
+        "flake-root": "flake-root",
+        "git-hooks-nix": "git-hooks-nix",
+        "import-tree": "import-tree",
+        "nix-unit": "nix-unit",
+        "nixpkgs": "nixpkgs",
+        "treefmt-nix": "treefmt-nix_2"
+      },
+      "locked": {
+        "path": "..",
+        "type": "path"
+      },
+      "original": {
+        "path": "..",
+        "type": "path"
+      },
+      "parent": []
+    },
     "gen-prelude": {
       "locked": {
         "lastModified": 1782849654,
@@ -155,7 +176,7 @@
       "inputs": {
         "flake-compat": "flake-compat",
         "nixpkgs": [
-          "root",
+          "gen-harness",
           "nixpkgs"
         ]
       },
@@ -192,7 +213,7 @@
     "nix-github-actions": {
       "inputs": {
         "nixpkgs": [
-          "root",
+          "gen-harness",
           "nix-unit",
           "nixpkgs"
         ]
@@ -215,7 +236,7 @@
       "inputs": {
         "nix-github-actions": "nix-github-actions",
         "nixpkgs": [
-          "root",
+          "gen-harness",
           "nixpkgs"
         ],
         "treefmt-nix": "treefmt-nix"
@@ -278,37 +299,16 @@
     "root": {
       "inputs": {
         "gen-dispatch": "gen-dispatch",
+        "gen-harness": "gen-harness",
         "gen-prelude": "gen-prelude_2",
         "gen-select": "gen-select",
-        "nixpkgs": "nixpkgs",
-        "root": "root_2"
+        "nixpkgs": "nixpkgs_2"
       }
-    },
-    "root_2": {
-      "inputs": {
-        "devshell": "devshell",
-        "flake-parts": "flake-parts",
-        "flake-root": "flake-root",
-        "git-hooks-nix": "git-hooks-nix",
-        "import-tree": "import-tree",
-        "nix-unit": "nix-unit",
-        "nixpkgs": "nixpkgs_2",
-        "treefmt-nix": "treefmt-nix_2"
-      },
-      "locked": {
-        "path": "..",
-        "type": "path"
-      },
-      "original": {
-        "path": "..",
-        "type": "path"
-      },
-      "parent": []
     },
     "treefmt-nix": {
       "inputs": {
         "nixpkgs": [
-          "root",
+          "gen-harness",
           "nix-unit",
           "nixpkgs"
         ]
@@ -330,7 +330,7 @@
     "treefmt-nix_2": {
       "inputs": {
         "nixpkgs": [
-          "root",
+          "gen-harness",
           "nixpkgs"
         ]
       },

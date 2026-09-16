@@ -1,10 +1,10 @@
 {
   inputs = {
-    # The harness tests itself with itself: `root` is this repository, and `root.lib.mkCi` is the
-    # subject. The oracle is therefore not independent — an mkCi that cannot evaluate takes its own
-    # suite down instead of reporting a red test. Known and accepted; hosting these suites in a
-    # harness-free flake is a later, separate decision.
-    root.url = "path:..";
+    # The harness tests itself with itself: `gen-harness` is this repository, and
+    # `gen-harness.lib.mkCi` is the subject. The oracle is therefore not independent — an mkCi that
+    # cannot evaluate takes its own suite down instead of reporting a red test. Known and accepted;
+    # hosting these suites in a harness-free flake is a later, separate decision.
+    gen-harness.url = "path:..";
 
     # gen-prelude ENTERS HERE AND ONLY HERE — the test plane. The agreement suite compares the
     # vendored hasInfix (../prelude.nix) against the original, so the duplication is checked rather
@@ -26,8 +26,8 @@
   };
 
   outputs =
-    inputs@{ root, ... }:
-    root.lib.mkCi {
+    inputs@{ gen-harness, ... }:
+    gen-harness.lib.mkCi {
       inherit inputs;
       name = "gen-harness";
       testModules = ./tests;
