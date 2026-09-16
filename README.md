@@ -24,17 +24,17 @@ the harness plus the tools, with no library it did not ask for.
 {
   inputs = {
     gen-harness.url = "github:sini/gen-harness";
-    root.url = "path:..";
+    gen-schema.url = "path:..";
     nixpkgs.url = "https://channels.nixos.org/nixos-unstable/nixexprs.tar.xz";
   };
 
   outputs =
-    inputs@{ gen-harness, root, ... }:
+    inputs@{ gen-harness, gen-schema, ... }:
     gen-harness.lib.mkCi {
       inherit inputs;
       name = "gen-schema";
       testModules = ./tests;
-      specialArgs = { genSchema = root.lib; };
+      specialArgs = { genSchema = gen-schema.lib; };
     };
 }
 ```
@@ -105,7 +105,8 @@ trusted; that pin is in the flake no consumer pins, so it reaches nobody's lock.
 
 > **Conformance rule.** Any library whose ci tests consume a `genPrelude` attribute other than
 > `hasInfix` — directly or through an alias — must supply `genPrelude` in its own ci `specialArgs`,
-> from `root.inputs.gen-prelude.lib`.
+> from its self-reference's `inputs.gen-prelude.lib` — `gen-schema.inputs.gen-prelude.lib` for the
+> example above.
 
 The rule is a class, not a patch list: a suite reaching past `hasInfix` is asking for the prelude
 library, and the prelude library is one flake input away at its own root. Widening this repository
@@ -121,7 +122,7 @@ moved: of the four suites `nix eval ./ci#tests --apply builtins.attrNames` names
 about the harness and `dispatch-select-adapter` is the gen-dispatch × gen-select pairing, which
 declares both siblings as this flake's own inputs rather than either library's.
 
-It reaches `mkCi` through `root.url = "path:.."`: the harness tests itself with itself. The
+It reaches `mkCi` through `gen-harness.url = "path:.."`: the harness tests itself with itself. The
 consequence is stated rather than hidden — a change that stops `mkCi` evaluating takes its own
 suite down instead of reporting a red test. Indirect coverage is what catches that case today:
 every library in the ecosystem builds its suite from this repository.
