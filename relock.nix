@@ -55,8 +55,8 @@ pkgs.writeShellApplication {
         "relock — bump this repository's locks, root first and then ./ci through the node that" \
         "carries the input there." \
         "" \
+        "  relock           bump every declared input to its own tip, both locks" \
         "  relock <input>   bump one declared input" \
-        "  relock --fresh   bump every declared input to its own tip, both locks" \
         "  relock --hub     converge both locks onto whatever the gen hub pins" \
         "" \
         "The hub defaults to github:sini/gen; set GEN_HUB to name another." >&2
@@ -136,14 +136,11 @@ pkgs.writeShellApplication {
 
     mode=''${1:-}
     # Handled before anything is read or written: `--help` must not depend on a lock being
-    # well-formed. Written as an `if` and not `[ -z "$mode" ] && exit 2`, because under `set -e` a
-    # false test at the head of an `&&` list is itself a non-zero command and would exit there.
+    # well-formed. The EMPTY mode is not handled here — it is the bump-everything act, dispatched
+    # with the others below.
     case "$mode" in
-      "" | -h | --help)
+      -h | --help)
         usage
-        if [ -z "$mode" ]; then
-          exit 2
-        fi
         exit 0
         ;;
     esac
@@ -181,7 +178,11 @@ pkgs.writeShellApplication {
     fi
 
     case "$mode" in
-      --fresh)
+      # NO ARGUMENT IS THE BUMP-EVERYTHING ACT, and it is spelled that way because the primitive
+      # this wraps spells it that way: `nix flake update` with no input names updates ALL of them,
+      # with a name updates that one. A flag for the unnamed case would be new vocabulary over a
+      # verb the caller already knows (owner-ruled 2026-09-18).
+      "")
         printf '%s: bumping every declared input to its own tip.\n' "$self"
         nix flake update --flake "$root"
         if [ -f "$ciLock" ]; then
