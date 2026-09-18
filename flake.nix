@@ -61,6 +61,28 @@
     # the hub carries no `ci/tests-error.nix` and this check classifies its tree `no-plane`.
     lib.checks.ciPlaneCoverage = import ./ci-plane-coverage.nix;
 
+    # The self-input invariant, published for its SCANNER as much as for its check. The derivation
+    # carries `passthru.scanner` — the predicate as a script, which `relock` below execs over a
+    # lock it has just written and which any instrument can drive over a tree with no flake around
+    # it. Exposing `lib.relock` without this one would publish a function no consumer could call:
+    # `relock` takes the scanner rather than building its own, because the check and the command
+    # must run ONE predicate and two constructions of it drift.
+    lib.checks.ciSelfInput = import ./ci-self-input.nix;
+
+    # ★ THE TWO-ACT LOCK BUMP, PUBLISHED AS A BUILDER RATHER THAN AS A DEVSHELL ENTRY. Every mkCi
+    # consumer gets `relock` through `flakeModule.nix`, which is the ordinary route and is
+    # unchanged. The hub is the case this exists for: it is legitimately NOT an mkCi consumer — it
+    # exposes flake checks and a perf app rather than a nix-unit `tests` output, so it cannot take
+    # the module — and it already wires its own devshell from `lib.checks.*` à la carte. Without a
+    # published builder the one command that mutates locks in every member's repository was the
+    # only harness surface the hub could not reach.
+    #
+    # `{ pkgs, name, scanner }` -> the command derivation. `flakeModule.nix` imports the same file
+    # for its devshell entry; Nix caches `import` by path, so the module's `relock` and this one
+    # are the SAME value in any evaluation that reaches both — the module cannot drift from the
+    # published surface by construction rather than by discipline.
+    lib.relock = import ./relock.nix;
+
     # `{ names, plugins }` — the membership fact and the `programs.mdformat.plugins` value built
     # from it. Both are published because a consumer that installs the set must also be able to
     # hand its names to the guard, and deriving them at the call site would be a second
