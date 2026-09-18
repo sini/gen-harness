@@ -303,6 +303,25 @@ in
             exit "$st"
           '';
         };
+
+        # ★ ONE VALUE, TWO CONSUMERS, AND THAT IS WHY IT IS BOUND HERE RATHER THAN INLINE AT
+        # `checks.ci-self-input`. The self-input invariant has to be held at BOTH ends: the check
+        # catches a violating lock whenever the gate runs, and `relock` catches it at the moment of
+        # mutation so the state never lands. Both ends must run the SAME predicate — two statements
+        # of one rule drift — so the scanner is built once, inside the check, and reached from its
+        # passthru here.
+        selfInput = import ./ci-self-input.nix {
+          inherit pkgs name;
+          root = inputs.self.sourceInfo.outPath;
+        };
+
+        # The two-act lock bump, shipped as a devshell command so every `mkCi` consumer inherits one
+        # definition of an act that is repeated, mechanical, and silent in each of its failure
+        # modes. `relock.nix` names the three.
+        relockCmd = import ./relock.nix {
+          inherit pkgs name;
+          scanner = selfInput.scanner;
+        };
       in
       {
         # Pre-commit hooks: format check + unit tests
@@ -434,6 +453,11 @@ in
           inherit pkgs name testsError;
           root = inputs.self.sourceInfo.outPath;
         };
+
+        # A member's `ci/` never tests a PUBLISHED COPY OF ITSELF. Bound in the `let` above because
+        # `relock` runs the same predicate on the tree it produces; the file holds the ruling, the
+        # reason the match is on `locked.repo`, and the reason it does not assert `flake = false`.
+        checks.ci-self-input = selfInput;
 
         # The batch gate, built from the asserter above. Its quantifier is `flake.tests` and
         # nothing else, which is the structural reason a cell whose `expr` can abort has to live on
@@ -567,6 +591,17 @@ in
                 nix-unit \
                   --flake "$FLAKE_ROOT/ci#$target" \
                   --gc-roots-dir "$FLAKE_ROOT/ci/.gcroots" "''${@:2}"
+              '';
+            }
+            {
+              name = "relock";
+              help = "Bump this repository's locks, root then ci [relock <input>|--fresh|--hub]";
+              # A thin call and not an inline script: the command and `checks.ci-self-input` share
+              # one predicate, so it is built as a derivation and reached from both. The binary
+              # resolves `$FLAKE_ROOT` itself — it must work from a plain shell too, since the
+              # member whose locks most need bumping is the one whose devshell is stale.
+              command = ''
+                "${relockCmd}/bin/${name}-relock" "$@"
               '';
             }
             {
