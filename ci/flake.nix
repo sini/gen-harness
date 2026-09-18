@@ -46,6 +46,13 @@
       # The `]` cells' `expr` ABORTS the moment `]` re-enters either escape set, and the batch
       # asserter behind `checks.default` cannot hold that — it forces every `expr` under
       # `flake.tests`. Those cells live on a second output instead.
-      extraModules = [ ./tests-error.nix ];
+      #
+      # `relock-behaviour.nix` adds a flake CHECK and no cells at all: its arms are the exit codes
+      # and messages of a built command over synthetic trees, which no `expr`/`expected` pair can
+      # express.
+      extraModules = [
+        ./tests-error.nix
+        ./relock-behaviour.nix
+      ];
     };
 }
