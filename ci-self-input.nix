@@ -148,10 +148,27 @@ let
     };
   };
 
-  # Strictly shorter and strictly longer than `name`, derived rather than written, so the two
-  # substring seeds stay correct in every consumer whatever it is called.
+  # ★★ EVERY REPOSITORY NAME IN A SEED IS DERIVED FROM `name`. NONE IS WRITTEN. A seed that names
+  # "some other repository" by hardcoding a real member's name IS that member's own name in that
+  # member, so the seed's expectation inverts in exactly the repositories it names — and it does so
+  # silently, because these are NEGATIVE controls and a negative control that starts refusing reads
+  # like the subject being dirty.
+  #
+  # MEASURED 2026-09-18, at the cost of two false CI reds in one propagation: `clean-siblings`
+  # hardcoded `gen-prelude` and `gen-graph`, and its arming failed in exactly and only those two
+  # members — `ARMING FAILED: clean-siblings expected rc=0, got rc=1`, on node `a` in gen-prelude
+  # and node `b` in gen-graph — while both members' real locks were clean and the live arm said so
+  # in the same output. `clean-flake-false-other` hardcoded `gen` and held the identical defect
+  # latent, firing the moment the check is asked about the hub (measured: it does). Renaming to two
+  # other members would only move the bug onto them; the property has to be structural.
+  #
+  # THE PROPERTY: a string that strictly CONTAINS `name` can never equal `name`, so a name built by
+  # extending it is provably not the member under test, whatever that member is called. That is also
+  # the rule the predicate itself implements — equality on the resolved repository, never substring
+  # — so these stand-ins exercise it in both directions while they play foreign repositories.
   shorterName = builtins.substring 0 (builtins.stringLength name - 1) name;
   longerName = "${name}-sibling";
+  prefixedName = "sibling-${name}";
 
   seeds = [
     {
@@ -194,20 +211,25 @@ let
       };
     }
     {
+      # TWO foreign nodes rather than one: a populated lock must read clean, not merely an empty
+      # one. Both names are derived (see above) and they extend `name` in opposite directions, so
+      # the cell also says that neither a prefix nor a suffix match is an equality match.
       label = "clean-siblings";
       expect = 0;
       nodes = {
-        a = ghNode "gen-prelude";
-        b = ghNode "gen-graph";
+        a = ghNode longerName;
+        b = ghNode prefixedName;
       };
     }
     {
       # A `flake = false` node for ANOTHER repository is unremarkable — gen-memo's hub pin is
-      # exactly this — and a predicate that reded here would be asserting the mechanism.
+      # exactly this — and a predicate that reded here would be asserting the mechanism. The name
+      # is DERIVED, not `gen`: written as the hub's real name this cell inverted whenever the check
+      # was asked about the hub, which is the same defect `clean-siblings` carried live.
       label = "clean-flake-false-other";
       expect = 0;
       nodes = {
-        hub = (ghNode "gen") // {
+        hub = (ghNode prefixedName) // {
           flake = false;
         };
       };
@@ -261,7 +283,9 @@ let
 
   readerLive = builtins.pathExists "${root}/ci/flake.nix";
   readerRepair = "CONTROL FAILED: the reader cannot see ci/flake.nix under its root (${root}): the check is bound to the wrong tree. `root` must be inputs.self.sourceInfo.outPath.";
-  armingRepair = "an arming cell stopped firing: the scanner no longer discriminates the state its seed encodes. A guard that can no longer refuse is not a passing guard; repair the predicate, never the seed.";
+  # ★ READ WHICH WAY THE CELL FAILED BEFORE TOUCHING ANYTHING — the two directions have opposite
+  # repairs, and the single-direction version of this sentence sent a reader at a correct scanner.
+  armingRepair = "an arming cell stopped discriminating, and WHICH WAY it failed decides the repair. (1) A cell that expected a REFUSAL (expect=1) and got a pass means the scanner can no longer refuse. A guard that cannot refuse is not a passing guard: repair the predicate, never the seed. (2) A cell that expected a PASS (expect=0) and got a refusal may instead mean the SEED IS INVALID IN THIS REPOSITORY — a seed standing in for another repository must be DERIVED from `name`, because a hardcoded name is the member's own name in that member. Measured 2026-09-18: `clean-siblings` hardcoded gen-prelude and gen-graph and reded in exactly those two, with both real locks clean. The `live:` line below is the tell — if it says no node resolves to this repository, the member is fine and the seed is the defect.";
 in
 pkgs.runCommand "${name}-ci-self-input"
   {
