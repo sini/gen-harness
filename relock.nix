@@ -75,9 +75,47 @@ pkgs.writeShellApplication {
     ciDir=$root/ci
     ciLock=$ciDir/flake.lock
 
+    # ★ A MISSING ROOT LOCK IS USUALLY CORRECT, AND THE DISCRIMINATION IS THE WHOLE POINT. A flake
+    # that declares ZERO inputs never acquires a lock, and that shape is the stated objective for a
+    # gen library (den-hoag-4dfsv: usable WITH and WITHOUT flakes — no flake inputs, a `default.nix`
+    # deferring to `ci/flake.lock`). Measured 2026-09-18: gen-identity, gen-prelude and gen-algebra
+    # are all of that shape, and they are the leaves everything else depends on — so refusing them
+    # refused exactly the members that best match the architecture this command serves.
+    #
+    # DECLARED-BUT-UNLOCKED IS A DIFFERENT STATE AND IS REFUSED, never folded into the one above.
+    # Such a repository has never been locked at all, and writing its FIRST lock is not a relock:
+    # it is a larger act than this command takes on its own authority, and `nix flake lock` is the
+    # one line that takes it deliberately. Folding the two together would silently ci-only a member
+    # whose root inputs are simply not locked yet, which is the class of clean exit this whole
+    # command exists to remove.
+    rootLocked=yes
     if [ ! -f "$rootLock" ]; then
-      printf '%s: no flake.lock at %s — nothing to relock.\n' "$self" "$rootLock" >&2
-      exit 2
+      rootLocked=no
+      if [ ! -f "$root/flake.nix" ]; then
+        printf '%s: no flake.nix and no flake.lock at %s — not a flake repository.\n' "$self" "$root" >&2
+        exit 2
+      fi
+      # Read from the FILE, because with no lock there is nothing else to read it from. This is the
+      # one place the lock is not the statement of the declared set — and `outputs` is never forced,
+      # so no input is fetched and nothing is evaluated beyond the attribute names.
+      rc=0
+      rootInputs=$(nix eval --json --file "$root/flake.nix" \
+        --apply 'f: builtins.attrNames (f.inputs or { })') || rc=$?
+      if [ "$rc" -ne 0 ]; then
+        printf '%s: CONTROL FAILED — could not read the declared inputs of %s/flake.nix.\n' \
+          "$self" "$root" >&2
+        exit 2
+      fi
+      if [ "$rootInputs" != "[]" ]; then
+        printf '%s\n' \
+          "$self: REFUSED, and nothing was written. $root/flake.nix DECLARES inputs but carries no" \
+          "flake.lock:" \
+          "  $(printf '%s' "$rootInputs" | jq -r 'join(" ")')" \
+          "A flake with zero inputs legitimately has no lock and this command relocks its ci/ alone;" \
+          "a flake with inputs and no lock has never been locked, and writing its first lock is not" \
+          "a relock. Run: nix flake lock" >&2
+        exit 1
+      fi
     fi
 
     # The DECLARED INPUT SET of a flake, read from its LOCK. The lock is the only offline statement
@@ -172,7 +210,9 @@ pkgs.writeShellApplication {
     # produced tree violates the invariant the incoming one satisfied.
     backup=$(mktemp -d)
     trap 'rm -rf "$backup"' EXIT
-    cp "$rootLock" "$backup/root.json"
+    if [ "$rootLocked" = yes ]; then
+      cp "$rootLock" "$backup/root.json"
+    fi
     if [ -f "$ciLock" ]; then
       cp "$ciLock" "$backup/ci.json"
     fi
@@ -183,8 +223,15 @@ pkgs.writeShellApplication {
       # with a name updates that one. A flag for the unnamed case would be new vocabulary over a
       # verb the caller already knows (owner-ruled 2026-09-18).
       "")
-        printf '%s: bumping every declared input to its own tip.\n' "$self"
-        nix flake update --flake "$root"
+        # The ci-only case ANNOUNCES ITSELF. Silence would leave the caller unable to tell a
+        # one-act run from a two-act one, which is the same indistinguishability the delta report
+        # below exists to remove.
+        if [ "$rootLocked" = yes ]; then
+          printf '%s: bumping every declared input to its own tip.\n' "$self"
+          nix flake update --flake "$root"
+        else
+          printf '%s: no root inputs declared and no root lock; ci/ only.\n' "$self"
+        fi
         if [ -f "$ciLock" ]; then
           nix flake update --flake "$ciDir"
         fi
@@ -238,14 +285,18 @@ pkgs.writeShellApplication {
         input=$mode
         inRoot=no
         inCi=no
-        if hasInput "$rootLock" "$input"; then inRoot=yes; fi
+        if [ "$rootLocked" = yes ] && hasInput "$rootLock" "$input"; then inRoot=yes; fi
         if [ -f "$ciLock" ] && hasInput "$ciLock" "$input"; then inCi=yes; fi
 
         # ★ THE REFUSAL. Without it this command is `nix flake update`, which exits 0 on a name no
         # flake here declares and writes nothing — the failure mode the command exists to remove.
         if [ "$inRoot" = no ] && [ "$inCi" = no ]; then
           printf '%s: %s is not a declared input of this repository.\n' "$self" "$input" >&2
-          printf '  root  (flake.lock):    %s\n' "$(declared "$rootLock" | tr '\n' ' ')" >&2
+          if [ "$rootLocked" = yes ]; then
+            printf '  root  (flake.lock):    %s\n' "$(declared "$rootLock" | tr '\n' ' ')" >&2
+          else
+            printf '  root  (flake.lock):    none — this flake declares no inputs and has no lock.\n' >&2
+          fi
           if [ -f "$ciLock" ]; then
             printf '  ci    (ci/flake.lock): %s\n' "$(declared "$ciLock" | tr '\n' ' ')" >&2
           fi
@@ -325,7 +376,9 @@ pkgs.writeShellApplication {
     esac
 
     printf '%s: node delta\n' "$self"
-    report "root       " "$backup/root.json" "$rootLock"
+    if [ -f "$backup/root.json" ]; then
+      report "root       " "$backup/root.json" "$rootLock"
+    fi
     if [ -f "$backup/ci.json" ]; then
       report "ci/flake.lock" "$backup/ci.json" "$ciLock"
     fi
@@ -343,13 +396,20 @@ pkgs.writeShellApplication {
         exit 2
       fi
       if [ "$rc" -ne 0 ]; then
-        cp "$backup/root.json" "$rootLock"
+        # RESTORED FROM THE BACKUPS THAT WERE TAKEN, which on a ci-only member is `ci.json` alone.
+        # Guarded rather than assumed: an unguarded `cp` of an absent root backup would abort here
+        # under `set -e` and leave the violating ci lock ON DISK — an invariant that fires only on
+        # the two-act path is worse than none, because the members it would skip are the leaves.
+        if [ -f "$backup/root.json" ]; then
+          cp "$backup/root.json" "$rootLock"
+        fi
         if [ -f "$backup/ci.json" ]; then
           cp "$backup/ci.json" "$ciLock"
         fi
         printf '%s\n' \
-          "$self: REFUSED — this relock would have put this repository into its own ci closure. Both" \
-          "locks have been RESTORED to the state before the command ran, which the same check passed." >&2
+          "$self: REFUSED — this relock would have put this repository into its own ci closure. Every" \
+          "lock it touched has been RESTORED to the state before the command ran, which the same" \
+          "check passed." >&2
         exit 1
       fi
     fi
