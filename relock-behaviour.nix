@@ -12,6 +12,11 @@
 #   3. THE RESTORE. The self-input guard fired correctly on a ci-only member and then aborted under
 #      `set -e` on an unguarded `cp` of a backup that had never been taken, leaving the violating
 #      lock on disk while printing nothing about it.
+#   4. THE REPOSITORY. `FLAKE_ROOT` is the directory the devshell was ENTERED FROM, so entering it
+#      from inside `ci/` made the command read the ci lock as the root lock and SKIP the self-input
+#      check — silently, at rc=0 (`den-hoag-21296`). Eleven arms stayed green through it because
+#      every one of them wired `FLAKE_ROOT` to the fixture's true root and none could express the
+#      misdirection; the twelfth does, through the `flakeRoot` knob below.
 #
 # ★★ IT IS HERMETIC, AND THAT IS AN ASSERTION OF THIS CELL RATHER THAN A PROPERTY OF THE ARMS THAT
 # HAPPENED TO BE CHOSEN. Every refusal `relock` makes is decided BEFORE its first `nix flake
@@ -150,6 +155,10 @@ let
   # `wants` and `forbids` are matched against the COMBINED output. `locks` is `"unchanged"` where
   # the arm claims to write nothing — checked by digest around the whole invocation, never by
   # re-reading the file alone, because a write-then-restore returns a file to its original bytes.
+  # `flakeRoot` is OPTIONAL and defaults to the fixture's true root, `"$TMP/fix"`: an arm that omits
+  # it is testing the command, while an arm that sets it is testing what the command does when the
+  # devshell hands it the wrong directory — a property no arm could express while the root was
+  # wired unconditionally.
   arms = [
     {
       label = "help-exits-zero-and-documents-the-bare-form";
@@ -292,6 +301,40 @@ let
       locks = "unchanged";
     }
     {
+      # ★ THE REPOSITORY IS DISCRIMINATED, NOT TAKEN ON FLAKE_ROOT'S WORD. The only arm here whose
+      # `FLAKE_ROOT` points anywhere other than the fixture's true root, and it encodes the one
+      # shape the other eleven structurally cannot reach: `nix develop` entered from inside `ci/`,
+      # where numtide-devshell sets `FLAKE_ROOT` to `<repo>/ci` rather than to `<repo>`.
+      #
+      # ★★ WHY `dirty-ci` AND `--fresh`, AND WHAT IT WOULD HAVE CAUGHT. Run against the command
+      # BEFORE the discriminator, this arm's output is byte-identical to
+      # `a-clean-incoming-lock-passes-the-same-check` directly above — rc=2, `unknown option
+      # --fresh`, no `SELF-INPUT` — because the misdirection makes `$ciLock` a NONEXISTENT
+      # `ci/ci/flake.lock`, so the incoming self-input check is SKIPPED rather than passed. That is
+      # the defect stated exactly: a genuine violation, misdirected, reads as a clean tree. Which
+      # is why `unknown option --fresh` is FORBIDDEN here — reaching the option branch at all means
+      # the discriminator did not fire, and an arm that only asserted rc=2 would pass unrepaired.
+      #
+      # `--fresh` is refused by the `-*` branch before any lock read or `nix` call on EITHER side of
+      # the fix, so this arm never approaches the network whichever code it runs against.
+      label = "a-ci-directory-as-flake-root-is-refused-before-anything-is-read";
+      fixture = "dirty-ci";
+      flakeRoot = "$TMP/fix/ci";
+      args = [ "--fresh" ];
+      rc = 2;
+      wants = [
+        "the ci/ shape"
+        "Re-enter from the repository root"
+      ];
+      forbids = [
+        "unknown option --fresh"
+        "SELF-INPUT"
+        "ALREADY in its own ci closure"
+        "bumping every declared input"
+      ];
+      locks = "unchanged";
+    }
+    {
       # `--help` must not depend on a lock being well-formed, which is why it is handled before
       # anything is read. Held on the fixture whose lock is a refusal.
       label = "help-does-not-depend-on-the-lock";
@@ -354,7 +397,7 @@ let
     ''
       ${mkFixture arm.fixture}
       rc=0
-      FLAKE_ROOT="$TMP/fix" ${relock}/bin/${fixtureName}-relock ${
+      FLAKE_ROOT="${arm.flakeRoot or "$TMP/fix"}" ${relock}/bin/${fixtureName}-relock ${
         lib.concatMapStringsSep " " sh arm.args
       } > "$TMP/out" 2>&1 || rc=$?
 
@@ -382,8 +425,8 @@ let
       # and its pre-commit hook up after a bump — two acts that need a network and a devshell —
       # and it gates them on a NODE HAVING MOVED. No arm here can move a node, because moving one
       # needs the `nix flake update` none of them reaches. So the catch-up step must be silent in
-      # every one of them, and a change that ungates it shows up HERE, as eleven named failures,
-      # instead of as a suite that has quietly started needing the network.
+      # every one of them, and a change that ungates it shows up HERE, as a named failure on every
+      # arm, instead of as a suite that has quietly started needing the network.
       if grep -qF -- "so the tooling those nodes pin moved with them" "$TMP/out"; then
         fail ${sh arm.label} "the post-bump catch-up step ran on an arm that moved no node; it is gated on a node having moved, and this cell is hermetic only while that gate holds"
       fi

@@ -89,6 +89,39 @@ pkgs.writeShellApplication {
     ciDir=$root/ci
     ciLock=$ciDir/flake.lock
 
+    # ★ THE REPOSITORY IS ESTABLISHED, NOT TRUSTED, AND THE ANSWER CAN BE A REFUSAL. The devshell
+    # sets FLAKE_ROOT to the directory it was ENTERED FROM, not to the flake's own root, so a hand
+    # `nix develop` run from inside <repo>/ci sets it to <repo>/ci and every path above is off by
+    # one level: $rootLock is the REAL ci lock misread as the root lock, and $ciLock is a
+    # nonexistent <repo>/ci/ci/flake.lock whose absence SKIPS the incoming self-input check on a
+    # lock that was therefore never read. Bare relock then bumps the ci lock, reports it as a root
+    # delta and exits 0 — the clean-exit failure this command exists to remove, reintroduced one
+    # directory up from where the bare primitive used to do it.
+    #
+    # DISCRIMINATED, NOT DEFAULTED. Falling back to $PWD, or to git, when FLAKE_ROOT "looks wrong"
+    # would be another guess one layer up. The ci/ shape is decidable on EXISTENCE ALONE — a flake
+    # directory whose parent is a flake directory too is never a member's root — and existence
+    # needs no git, which a `git rev-parse` cross-check would have newly required of the git-less
+    # checkouts (tarball extractions, CI artifact checkouts) that work today.
+    #
+    # KNOWN RESIDUAL, named rather than hidden: a worktree created AS A SUBDIRECTORY of another
+    # flake-bearing repository has this shape and would be refused here. This roster's worktrees
+    # are siblings, never nested. The repair if it is ever hit is additive — name the intended root
+    # explicitly — and does not change the discrimination above.
+    #
+    # Spec: den-ag-design `specs/2026-09-19-relock-repository-discrimination-spec.md` §2.2 (b), §2.3.
+    parent=$(dirname "$root")
+    if [ -f "$root/flake.nix" ] && [ -f "$parent/flake.nix" ]; then
+      printf '%s\n' \
+        "$self: MALFORMED INVOCATION, and nothing was written. FLAKE_ROOT names $root, a flake" \
+        "directory whose parent $parent is a flake directory too — the ci/ shape. The devshell" \
+        "sets FLAKE_ROOT to the directory it was ENTERED FROM, so this is what entering it from" \
+        "inside ci/ looks like, and every path derived from it would be one level down: the ci" \
+        "lock read as the root lock, and the self-input check skipped on a lock never read." \
+        "Re-enter from the repository root:  cd $parent && nix develop ./ci" >&2
+      exit 2
+    fi
+
     # ★ A MISSING ROOT LOCK IS USUALLY CORRECT, AND THE DISCRIMINATION IS THE WHOLE POINT. A flake
     # that declares ZERO inputs never acquires a lock, and that shape is the stated objective for a
     # gen library (den-hoag-4dfsv: usable WITH and WITHOUT flakes — no flake inputs, a `default.nix`
