@@ -570,8 +570,11 @@ in
                 # harness itself wires — this one and the two pre-commit hooks — because a hole at
                 # any of them is one an author walks through by habit. A consumer's `extraModules`
                 # may wire further ones, which run the guard only if they call it themselves.
-                # `|| exit` rather than relying on `set -e`: this command is not a
-                # `writeShellApplication` and does not inherit its error handling.
+                # `|| exit` states the exit explicitly rather than leaning on the ambient shell
+                # options. It is NOT true that these scripts run without them: numtide-devshell
+                # emits `set -euo pipefail` into every command it materialises — driven, and `:515`
+                # already says so. A builder believing the older wording here wrote `cmd; rc=$?`
+                # in a consumer and the script exited before its second arm, printing nothing.
                 #
                 # `cd "$FLAKE_ROOT"` because the guard resolves the tree it checks from the CWD
                 # while nix-unit below is pinned to `$FLAKE_ROOT`. Run from another git worktree
