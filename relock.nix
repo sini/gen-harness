@@ -19,6 +19,16 @@
 # goal. Each side is bumped on its own terms; the only cross-lock assertion is the self-input
 # invariant below.
 #
+# ★★ AND THE LOCKS DECIDE MORE THAN THE LOCKS. A member's FORMATTER and its PRE-COMMIT HOOK are
+# both pinned by `ci/flake.lock` and neither follows a bump on its own, so a relock that stops at
+# the lock leaves the member unable to pass its OWN CI and running a hook that silently reverts
+# what that CI now requires. Both are caught up at the foot of this script, gated on a node having
+# actually moved; the comment there carries the seven measurements.
+#
+# EXIT VOCABULARY: 0 done · 1 REFUSED, nothing written · 2 a control failed or the invocation was
+# malformed · 3 THE LOCKS ARE WRITTEN AND THE TOOLING DID NOT FOLLOW — a state the other three
+# cannot express, and the one a caller must not read as either success or as "nothing happened".
+#
 # ★ IT VERIFIES ITS OWN OUTPUT AND REFUSES TO LEAVE A VIOLATING STATE. A relock is exactly the act
 # that can pull a member's own repository into its `ci/` closure, so `ci-self-input.nix`'s scanner
 # runs on the lock this command just produced, and both locks are RESTORED on a violation. The
@@ -58,6 +68,10 @@ pkgs.writeShellApplication {
         "  relock           bump every declared input to its own tip, both locks" \
         "  relock <input>   bump one declared input" \
         "  relock --hub     converge both locks onto whatever the gen hub pins" \
+        "" \
+        "When nodes actually move, the pre-commit hook is REINSTALLED and the formatter is" \
+        "APPLIED, because both are pinned by the locks just bumped and neither follows on its" \
+        "own. THIS REWRITES SOURCE. A run that moves nothing, and every refusal, does neither." \
         "" \
         "The hub defaults to github:sini/gen; set GEN_HUB to name another." >&2
     }
@@ -149,6 +163,13 @@ pkgs.writeShellApplication {
         | .[]'
     }
 
+    # ★ WHETHER ANYTHING MOVED AT ALL, which is a different question from whether the command
+    # SUCCEEDED and is the one the catch-up step at the foot of this script turns on. A run that
+    # moved no node bumped no formatter and no hook, so there is nothing for that step to do —
+    # and saying so this way keeps it out of every path that writes nothing, which is what lets
+    # `relock-behaviour.nix` stay hermetic.
+    movedAny=no
+
     report() {
       label=$1
       before=$2
@@ -160,6 +181,7 @@ pkgs.writeShellApplication {
       if [ -z "$delta" ]; then
         printf '  %s: 0 nodes moved\n' "$label"
       else
+        movedAny=yes
         printf '  %s: %s node(s) moved\n' "$label" "$(printf '%s\n' "$delta" | wc -l)"
         printf '%s\n' "$delta"
       fi
@@ -411,6 +433,70 @@ pkgs.writeShellApplication {
           "lock it touched has been RESTORED to the state before the command ran, which the same" \
           "check passed." >&2
         exit 1
+      fi
+    fi
+
+    # ★★ THE LOCKS ARE NOT THE ONLY THING THE LOCKS DECIDE. A member's FORMATTER and its
+    # PRE-COMMIT HOOK are both pinned by `ci/flake.lock`, and NEITHER follows a bump on its own:
+    #
+    #   THE FORMATTER. Measured four times on 2026-09-18 — gen-memo, gen-schema, gen-bind,
+    #   gen-merge — `nix fmt -- --ci` gives `0 changed` at the old pins and `1 changed` after. A
+    #   relock that moves its own formatter and does not apply it leaves the member UNABLE TO PASS
+    #   ITS OWN CI, and all four had to be hand-landed. ★ The ordering is forced rather than
+    #   preferred: measured on gen-schema, both arms in one run, a reformat carried into an
+    #   old-pin copy is REVERTED by the OLD formatter. It cannot land ahead of the bump; it rides
+    #   with it, which is here.
+    #
+    #   THE HOOK. `.pre-commit-config.yaml` is a MATERIALISED STORE PATH fixed at devshell entry,
+    #   and its `treefmt` entry keeps pointing at the OLD formatter after a bump — so it silently
+    #   REVERTS exactly what CI now requires, with both tools reporting success on their own
+    #   terms and the commit failing for a reason neither names. Measured three times in three
+    #   repositories (gen-memo 10998 -> 10978, gen-merge 12862 -> 12850). Re-entering the devshell
+    #   reinstalls it and the disagreement vanishes.
+    #
+    # ★ RE-ENTRY FROM INSIDE A DEVSHELL IS AVAILABLE, measured rather than assumed: with this
+    # repository's config deleted from inside its own `nix develop`, a NESTED `nix develop -c
+    # true` printed the installer's own `pre-commit installed at .git/hooks/pre-commit` and
+    # recreated the symlink, rc 0. The doubt this step was specified under does not hold.
+    #
+    # ★ GATED ON `movedAny`, NOT ON SUCCESS. A run that moved nothing moved no tooling, so this
+    # does not fire — which is also what keeps it out of every refusing path and out of the
+    # zero-input ci-only act, and therefore out of `relock-behaviour.nix`'s hermetic arms.
+    if [ "$movedAny" = yes ] && [ -f "$ciDir/flake.nix" ]; then
+      printf '%s: nodes moved, so the tooling those nodes pin moved with them.\n' "$self"
+
+      # ENTERED FROM INSIDE `$ciDir`, never with `nix develop "$ciDir"` from elsewhere: the
+      # installer resolves the repository from the CALLER's working directory, so the second form
+      # rewrites the hooks of whatever repository the caller happens to be standing in.
+      printf '  reinstalling the pre-commit hook at the new pin\n'
+      if ! ( cd "$ciDir" && nix develop -c true ); then
+        printf '%s\n' \
+          "$self: THE LOCKS ARE WRITTEN AND THE TOOLING DID NOT FOLLOW. Re-entering the devshell" \
+          "failed, so this repository's pre-commit hook still runs the formatter of the PREVIOUS" \
+          "pin — which will silently revert what its own CI now requires. Locks: kept, they are" \
+          "correct. Run: cd $ciDir && nix develop -c true" >&2
+        exit 3
+      fi
+
+      # ★ THIS REWRITES SOURCE, and it is announced BEFORE it runs rather than after: a lock-bump
+      # command that quietly edits tracked files is worse than one that does not, because the
+      # caller decides what to stage.
+      printf '  applying the formatter at the new pin — THIS REWRITES SOURCE\n'
+      if ! ( cd "$ciDir" && nix fmt ); then
+        printf '%s\n' \
+          "$self: THE LOCKS ARE WRITTEN AND THE FORMATTER FAILED. This repository is left in a" \
+          "state its own CI format step will refuse. Locks: kept, they are correct. Run:" \
+          "  cd $ciDir && nix fmt" >&2
+        exit 3
+      fi
+
+      # WHAT THE CALLER HAS TO STAGE BEYOND THE LOCKS. Named as what git reports rather than as
+      # what the formatter wrote: on a tree that was already dirty those are not the same set, and
+      # this command has no standing to claim the narrower one.
+      if git -C "$root" rev-parse --git-dir > /dev/null 2>&1; then
+        printf '%s: tracked files git now reports MODIFIED, the two locks excluded:\n' "$self"
+        git -C "$root" status --porcelain --untracked-files=no -- \
+          . ':(exclude)flake.lock' ':(exclude)ci/flake.lock'
       fi
     fi
   '';

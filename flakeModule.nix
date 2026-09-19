@@ -50,14 +50,16 @@ let
   # Until the asserter learns to skip them, those cells go on a separate output, outside the
   # `flake.tests` quantifier below; this repository's own ci does exactly that, with cells of the
   # second kind.
+  # ★ THE FAILURE MESSAGE IS ITS OWN FILE AND ITS OWN PUBLISHED NAME, because it runs ONLY on the
+  # arm below where a cell has already failed — so a defect in it fires exactly when someone needs
+  # the answer and is invisible every other time. `fail-message.nix` states what that cost when it
+  # happened, and being callable is what lets a cell hold it at a value that used to abort.
+  failMessage = import ./fail-message.nix { inherit lib; };
+
   assertTests = lib.mapAttrsToList (
     suite: subtests:
     lib.mapAttrsToList (
-      testName: t:
-      if t.expr == t.expected then
-        true
-      else
-        throw "FAIL ${suite}.${testName}: got ${builtins.toJSON t.expr}, expected ${builtins.toJSON t.expected}"
+      testName: t: if t.expr == t.expected then true else throw (failMessage suite testName t)
     ) subtests
   ) tests;
 in

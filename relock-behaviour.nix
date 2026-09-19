@@ -100,6 +100,14 @@ let
   };
 
   zeroInputFlake = "{ outputs = _: { }; }";
+
+  # ★ EVERY FIXTURE CARRIES A `ci/flake.nix`, because every mkCi member does and a fixture without
+  # one encodes a state no member can be in. It also makes the ONE guard that matters visible: the
+  # post-bump catch-up at the foot of `relock` is gated on a node having moved AND on a ci flake
+  # existing, and while no fixture had the second, the first could be deleted outright with every
+  # arm here still green. Never evaluated by any arm — `relock` reads `ci/flake.lock`, and the one
+  # `nix eval --file` it does is over the ROOT flake.
+  ciFlake = "{ outputs = _: { }; }";
   declaredFlake = ''
     {
       inputs.${alpha}.url = "github:sini/${alpha}";
@@ -151,6 +159,11 @@ let
       wants = [
         "relock <input>"
         "bump every declared input to its own tip"
+        # ★ THE SOURCE REWRITE IS DECLARED WHERE A CALLER LOOKS BEFORE RUNNING IT. A lock-bump
+        # command that also reformats the tree and says so only afterwards has already spent the
+        # caller's ability to decide; this arm holds the announcement to the ONE place it is
+        # readable in advance.
+        "THIS REWRITES SOURCE"
       ];
       forbids = [ "--fresh" ];
       locks = "unchanged";
@@ -304,6 +317,9 @@ let
       cat > "$TMP/fix/flake.nix" <<'FIXTURE_FLAKE'
       ${f.flake}
       FIXTURE_FLAKE
+      cat > "$TMP/fix/ci/flake.nix" <<'FIXTURE_CI_FLAKE'
+      ${ciFlake}
+      FIXTURE_CI_FLAKE
       ${lib.optionalString (f.rootLock != null) ''
         cat > "$TMP/fix/flake.lock" <<'FIXTURE_ROOT_LOCK'
         ${f.rootLock}
@@ -361,6 +377,16 @@ let
           fail ${sh arm.label} "a root flake.lock was created; this shape legitimately has none"
         fi
       ''}
+      # ★★ UNCONDITIONAL, ON EVERY ARM, AND IT IS THIS CELL'S HERMETICITY EXPRESSED AS AN
+      # ASSERTION ABOUT THE COMMAND RATHER THAN ABOUT THE BUILDER. `relock` catches its formatter
+      # and its pre-commit hook up after a bump — two acts that need a network and a devshell —
+      # and it gates them on a NODE HAVING MOVED. No arm here can move a node, because moving one
+      # needs the `nix flake update` none of them reaches. So the catch-up step must be silent in
+      # every one of them, and a change that ungates it shows up HERE, as eleven named failures,
+      # instead of as a suite that has quietly started needing the network.
+      if grep -qF -- "so the tooling those nodes pin moved with them" "$TMP/out"; then
+        fail ${sh arm.label} "the post-bump catch-up step ran on an arm that moved no node; it is gated on a node having moved, and this cell is hermetic only while that gate holds"
+      fi
       if [ "$armFailed" -eq 0 ]; then
         echo "arm ok:     ${arm.label} (rc=$rc)"
       fi
