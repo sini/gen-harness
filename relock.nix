@@ -66,14 +66,14 @@ pkgs.writeShellApplication {
         "carries the input there." \
         "" \
         "  relock           bump every declared input to its own tip, both locks" \
-        "  relock <input>   bump one declared input" \
-        "  relock --hub     converge both locks onto whatever the gen hub pins" \
+        "  relock <input>   bump one declared input; an input that FOLLOWS another is refused" \
         "" \
         "When nodes actually move, the pre-commit hook is REINSTALLED and the formatter is" \
         "APPLIED, because both are pinned by the locks just bumped and neither follows on its" \
         "own. THIS REWRITES SOURCE. A run that moves nothing, and every refusal, does neither." \
         "" \
-        "The hub defaults to github:sini/gen; set GEN_HUB to name another." >&2
+        "relock --hub is RETIRED (it pinned inputs to the hub's revisions). Use bare relock for this" \
+        "repository, and den-ag-design's relock-all to move the whole gen graph to its tips." >&2
     }
 
     # The worktree, NAMED rather than assumed, for the reason `readRootsGuard` states: the devshell
@@ -292,44 +292,10 @@ pkgs.writeShellApplication {
         fi
         ;;
 
-      --hub)
-        # CONVERGE, which is not the same act as bump: each input goes to the revision the HUB
-        # pins, not to its own tip. `nix flake lock --override-input` is the form that lands a
-        # NAMED revision; `--update-input`/`nix flake update` follows the dependency's own tip and
-        # would make this member a lone outlier one commit AHEAD of the roster instead of joining
-        # it (measured 2026-09-17 on gen-inspect, carried at den-hoag-graph-viz-viy69).
-        hub=''${GEN_HUB:-github:sini/gen}
-        printf '%s: converging onto %s.\n' "$self" "$hub"
-        hubMap=$(nix flake metadata --json --refresh "$hub" \
-          | jq -c '[ .locks.nodes | to_entries[]
-                     | select(.value.locked.repo != null and .value.locked.rev != null)
-                     | { key: .value.locked.repo,
-                         value: { owner: .value.locked.owner, rev: .value.locked.rev } } ]
-                   | from_entries')
-
-        converge() {
-          dir=$1
-          lock=$2
-          [ -f "$lock" ] || return 0
-          while IFS= read -r input; do
-            [ -n "$input" ] || continue
-            spec=$(jq -r --arg i "$input" --argjson hub "$hubMap" '
-              . as $d
-              | ($d.nodes[$d.root // "root"].inputs[$i]) as $k
-              | ($d.nodes[$k].locked // {}) as $l
-              | if ($l.repo // null) != null and ($hub[$l.repo] // null) != null
-                   and $hub[$l.repo].rev != ($l.rev // "")
-                then "github:\($hub[$l.repo].owner)/\($l.repo)/\($hub[$l.repo].rev)"
-                else "" end' "$lock")
-            [ -n "$spec" ] || continue
-            printf '  %s <- %s\n' "$input" "$spec"
-            nix flake lock "$dir" --override-input "$input" "$spec"
-          done < <(declared "$lock")
-        }
-        converge "$root" "$rootLock"
-        converge "$ciDir" "$ciLock"
-        ;;
-
+      # `--hub` (converge onto the hub's pins) is RETIRED and lands here as an unknown option,
+      # whose usage names the replacement. Owner ruling 2026-09-23, den-hoag-n76a7 arm δ: every
+      # lock points at the latest revision, so a mode that pins a member to the hub's closure has
+      # no remaining purpose — and its node selection moved pins backwards.
       -*)
         printf '%s: unknown option %s\n' "$self" "$mode" >&2
         usage
@@ -360,6 +326,32 @@ pkgs.writeShellApplication {
             "  not locked it yet, run: nix flake lock" >&2
           exit 1
         fi
+
+        # ★ A FOLLOWS INPUT IS REFUSED BY NAME, BEFORE ACT ONE. Its lock value is a node PATH (a
+        # list), not a node key: it has no revision of its own, `nix flake update <it>` no-ops
+        # with a warning, and the carrier lookup below would index the node table with that list
+        # and abort with a raw jq exit 5 (measured on gen-demo's `nixpkgs`, which follows
+        # `gen/nixpkgs`). It moves when the input it follows moves, so that is what to name.
+        for side in root ci; do
+          if [ "$side" = root ]; then
+            [ "$inRoot" = yes ] || continue
+            lock=$rootLock
+          else
+            [ "$inCi" = yes ] || continue
+            lock=$ciLock
+          fi
+          target=$(jq -r --arg i "$input" '
+            . as $d | $d.nodes[$d.root // "root"].inputs[$i]
+            | if type != "array" then "-" elif length == 0 then "" else join("/") end' "$lock")
+          if [ "$target" != "-" ]; then
+            # An EMPTY path is `follows = ""`: the input is disconnected and follows nothing.
+            printf '%s\n' \
+              "$self: REFUSED, and nothing was written. In the $side lock, $input follows ''${target:-nothing (follows = \"\")}:" \
+              "it has no revision of its own and moves only with what it follows. Run: relock ''${target%%/*}" \
+              "(or bare relock)." >&2
+            exit 1
+          fi
+        done
 
         # ACT ONE — the root.
         if [ "$inRoot" = yes ]; then

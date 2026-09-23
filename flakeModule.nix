@@ -600,7 +600,7 @@ in
             }
             {
               name = "relock";
-              help = "Bump this repository's locks, root then ci [relock [<input>|--hub]]";
+              help = "Bump this repository's locks, root then ci [relock [<input>]]";
               # A thin call and not an inline script: the command and `checks.ci-self-input` share
               # one predicate, so it is built as a derivation and reached from both. The binary
               # resolves `$FLAKE_ROOT` itself — it must work from a plain shell too, since the

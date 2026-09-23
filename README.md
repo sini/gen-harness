@@ -90,6 +90,18 @@ harness's declaration is used. Five of the seven are declared by no consumer in 
 today, so they are not optional extras — a harness missing one does not degrade, it fails to
 evaluate.
 
+### `relock`
+
+The devshell's `relock` bumps the repository's locks, root first and then `./ci`: bare `relock`
+moves every declared input to its own tip, and `relock <input>` moves one. An input that `follows`
+another is refused by name, because it moves only with what it follows. `relock --help` has the
+rest.
+
+`relock --hub`, which converged both locks onto the gen hub's pins, is retired and now refused as an
+unknown option. Every lock is meant to point at the latest revision, so there is nothing to converge
+onto: use bare `relock` for one repository, and den-ag-design's `relock-all` to move the whole gen
+graph to its tips in dependency order.
+
 ## The `genPrelude` surface, and the conformance rule
 
 Every suite receives `genPrelude`, and it carries **one attribute: `hasInfix`** — the

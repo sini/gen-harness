@@ -97,6 +97,24 @@ let
         ${alpha} = ghNode alpha;
         ${beta} = ghNode beta;
       };
+  # A root input that FOLLOWS another input's input — gen-demo's `nixpkgs = [ "gen" "nixpkgs" ]`
+  # shape. Its lock value is a node path, not a node key.
+  follower = "${fixtureName}-follower";
+  followsRootLock =
+    mkLock
+      {
+        ${alpha} = alpha;
+        ${follower} = [
+          alpha
+          "nixpkgs"
+        ];
+      }
+      {
+        ${alpha} = ghNode alpha // {
+          inputs.nixpkgs = "nixpkgs";
+        };
+        nixpkgs = ghNode "${fixtureName}-nixpkgs";
+      };
   cleanCiLock = mkLock { ${alpha} = alpha; } { ${alpha} = ghNode alpha; };
   # A ci lock that ALREADY carries this repository — the state §2.2's incoming arm refuses.
   dirtyCiLock = mkLock { ${alpha} = alpha; } {
@@ -128,6 +146,7 @@ let
   #                   carries no ci lock either, so the act reduces to its announcement and the
   #                   arm stays hermetic.
   # `declared-unlocked`  NO root lock and a flake that DOES declare — the anomaly, refused.
+  # `follows-root`    `two-act` plus a root input that FOLLOWS another's input.
   fixtures = {
     two-act = {
       rootLock = declaredRootLock;
@@ -147,6 +166,11 @@ let
     declared-unlocked = {
       rootLock = null;
       ciLock = null;
+      flake = declaredFlake;
+    };
+    follows-root = {
+      rootLock = followsRootLock;
+      ciLock = cleanCiLock;
       flake = declaredFlake;
     };
   };
@@ -331,6 +355,44 @@ let
         "SELF-INPUT"
         "ALREADY in its own ci closure"
         "bumping every declared input"
+      ];
+      locks = "unchanged";
+    }
+    {
+      # ★ THE RETIRED MODE FAILS LOUDLY, like `--fresh` above. `--hub` converged a member onto the
+      # hub's pins; it was retired by owner ruling 2026-09-23 (`den-hoag-n76a7`, arm δ). Typed from
+      # muscle memory it must reach the unknown-option branch, never a converge and never the bare
+      # act — and the usage printed there names what replaced it.
+      label = "the-retired-hub-mode-is-refused-and-names-its-replacement";
+      fixture = "two-act";
+      args = [ "--hub" ];
+      rc = 2;
+      wants = [
+        "unknown option --hub"
+        "relock-all"
+      ];
+      forbids = [
+        "converging onto"
+        "bumping every declared input"
+      ];
+      locks = "unchanged";
+    }
+    {
+      # ★ A FOLLOWS INPUT IS REFUSED BY NAME, BEFORE ACT ONE. Its lock value is a node PATH (a
+      # list), not a node, so it has no revision of its own: `nix flake update <it>` no-ops with a
+      # warning, and the ci carrier lookup then indexed the node table with that list and aborted
+      # with a raw jq exit 5 (measured on gen-demo's `nixpkgs`, which follows `gen/nixpkgs`).
+      label = "a-follows-input-is-refused-by-name-before-anything-is-written";
+      fixture = "follows-root";
+      args = [ follower ];
+      rc = 1;
+      wants = [
+        "${follower} follows ${alpha}/nixpkgs"
+        "REFUSED, and nothing was written"
+      ];
+      forbids = [
+        "jq: error"
+        "is not a declared input"
       ];
       locks = "unchanged";
     }
