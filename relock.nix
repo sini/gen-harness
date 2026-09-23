@@ -172,9 +172,22 @@ pkgs.writeShellApplication {
     declared() {
       jq -r '. as $d | ($d.nodes[$d.root // "root"].inputs // {}) | keys[]' "$1"
     }
+    # ★ THREE ANSWERS, NOT TWO. `jq -e` exits 1 for false and ≥2 when it could not read the lock at
+    # all, and inside an `if` errexit does not fire — so a bare `jq -e` here read an unreadable lock
+    # as "not declared", printed `skipped`, and went on to act (den-hoag-yjs6x). The error is a
+    # refusal, never a value.
     hasInput() {
+      local rc=0
       jq -e --arg i "$2" '. as $d | (($d.nodes[$d.root // "root"].inputs // {}) | has($i))' "$1" \
-        > /dev/null
+        > /dev/null || rc=$?
+      case $rc in
+        0) return 0 ;;
+        1) return 1 ;;
+      esac
+      printf '%s\n' \
+        "$self: REFUSED, and nothing was written. $1 could not be read to decide whether $2 is" \
+        "declared there (jq rc=$rc): its root node's inputs are not a set. Repair the lock first." >&2
+      exit 1
     }
 
     # The node delta between two states of one lock, keyed by the lock's OWN node names. A
@@ -237,6 +250,27 @@ pkgs.writeShellApplication {
         exit 0
         ;;
     esac
+
+    # ★ AN UNREADABLE LOCK IS REFUSED BY NAME, BEFORE ANYTHING IS DECIDED FROM IT. Every reader
+    # below takes a lock's shape for granted, and the ones inside a condition read a jq failure as
+    # an answer: measured at 0f32611 on gen-demo with its root lock truncated to 200 bytes,
+    # `relock nixpkgs` printed `root: nixpkgs is not declared there; skipped`, ran `nix flake
+    # update` on ci, and died only at the node delta (den-hoag-yjs6x). The shape asserted is the
+    # one those readers index: an object whose `nodes` is a set containing the root node.
+    for lock in "$rootLock" "$ciLock"; do
+      [ -f "$lock" ] || continue
+      rc=0
+      err=$(jq -e 'type == "object" and (.nodes | type == "object")
+        and (.nodes[.root // "root"] | type == "object")' "$lock" 2>&1 > /dev/null) || rc=$?
+      if [ "$rc" -ne 0 ]; then
+        printf '%s\n' \
+          "$self: REFUSED, and nothing was written. $lock is UNREADABLE as a flake lock (jq rc=$rc)." \
+          "''${err:-It parses, but has no nodes set containing its root node.}" \
+          "Every decision this command makes is read from that lock. Restore it, e.g.:" \
+          "  git -C $root checkout -- $lock" >&2
+        exit 1
+      fi
+    done
 
     # ★ THE INCOMING STATE IS CHECKED FIRST, AND A PRE-EXISTING VIOLATION STOPS THE COMMAND DEAD.
     # Two reasons, both measured on 2026-09-18 while building this. (1) `nix develop` AUTO-LOCKS an
@@ -380,7 +414,10 @@ pkgs.writeShellApplication {
 
           carriers=()
           if [ -n "$repo" ]; then
-            mapfile -t carriers < <(jq -r --arg repo "$repo" '
+            # Captured, never read through `< <(…)`: a process substitution's exit is discarded,
+            # so a jq failure there read as "no input carries it" and left the ci lock behind.
+            rc=0
+            carrierList=$(jq -r --arg repo "$repo" '
               def repoOf($d; $n):
                 ($d.nodes[$n].locked // {}) as $l
                 | if ($l.repo // null) != null then $l.repo
@@ -404,7 +441,16 @@ pkgs.writeShellApplication {
               | select(.value | type == "string")
               | . as $e
               | select(closure($d; $e.value) | any(repoOf($d; .) == $repo))
-              | $e.key' "$ciLock")
+              | $e.key' "$ciLock") || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              printf '%s\n' \
+                "$self: CONTROL FAILED — ci/flake.lock could not be read to find what carries $repo" \
+                "(jq rc=$rc). The root lock is LEFT AS WRITTEN and ci/flake.lock was not touched." >&2
+              exit 2
+            fi
+            if [ -n "$carrierList" ]; then
+              mapfile -t carriers <<< "$carrierList"
+            fi
           elif [ "$inCi" = yes ]; then
             # No resolved repository to trace (a tarball or path input, `nixpkgs` being the
             # standing case): the ci flake declares the name itself, so that name IS the carrier.

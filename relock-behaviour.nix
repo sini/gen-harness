@@ -17,6 +17,8 @@
 #      check — silently, at rc=0 (`den-hoag-21296`). Eleven arms stayed green through it because
 #      every one of them wired `FLAKE_ROOT` to the fixture's true root and none could express the
 #      misdirection; the twelfth does, through the `flakeRoot` knob below.
+#   5. THE UNREADABLE LOCK. A jq failure inside a condition read as "not declared", so a truncated
+#      root lock printed `skipped` and the command acted on ci before dying (`den-hoag-yjs6x`).
 #
 # ★★ IT IS HERMETIC, AND THAT IS AN ASSERTION OF THIS CELL RATHER THAN A PROPERTY OF THE ARMS THAT
 # HAPPENED TO BE CHOSEN. Every refusal `relock` makes is decided BEFORE its first `nix flake
@@ -170,6 +172,25 @@ let
     };
     follows-root = {
       rootLock = followsRootLock;
+      ciLock = cleanCiLock;
+      flake = declaredFlake;
+    };
+    # `two-act` with one lock CUT SHORT mid-string — the measured shape of den-hoag-yjs6x, where a
+    # jq parse error inside a condition read as "not declared" and the command went on to act.
+    truncated-root = {
+      rootLock = builtins.substring 0 60 declaredRootLock;
+      ciLock = cleanCiLock;
+      flake = declaredFlake;
+    };
+    truncated-ci = {
+      rootLock = declaredRootLock;
+      ciLock = builtins.substring 0 40 cleanCiLock;
+      flake = declaredFlake;
+    };
+    # WELL-FORMED down to its root node, whose `inputs` is not a set: it passes the readability
+    # gate and reaches `hasInput`, whose `has` then fails — the site behind the gate.
+    root-inputs-not-a-set = {
+      rootLock = mkLock "not-a-set" { };
       ciLock = cleanCiLock;
       flake = declaredFlake;
     };
@@ -392,6 +413,61 @@ let
       ];
       forbids = [
         "jq: error"
+        "is not a declared input"
+      ];
+      locks = "unchanged";
+    }
+    {
+      # ★ DEFECT 5. An unreadable root lock read as "not declared" — `skipped` — and act two ran
+      # `nix flake update` on ci before the command died at the node delta. It must refuse by name
+      # before any act, so `skipped` and the delta header are both forbidden.
+      label = "an-unreadable-root-lock-is-refused-by-name-before-act-one";
+      fixture = "truncated-root";
+      args = [ alpha ];
+      rc = 1;
+      wants = [
+        "REFUSED, and nothing was written"
+        "flake.lock is UNREADABLE as a flake lock"
+      ];
+      forbids = [
+        "is not declared there; skipped"
+        "node delta"
+      ];
+      locks = "unchanged";
+    }
+    {
+      # The same gate on the BARE act, whose only reader of the root lock is `nix flake update`.
+      label = "an-unreadable-root-lock-refuses-the-bare-act-too";
+      fixture = "truncated-root";
+      args = [ ];
+      rc = 1;
+      wants = [ "flake.lock is UNREADABLE as a flake lock" ];
+      forbids = [ "bumping every declared input" ];
+      locks = "unchanged";
+    }
+    {
+      # The ci side, named as such, ahead of the self-input scanner's own generic CONTROL FAILED.
+      label = "an-unreadable-ci-lock-is-refused-by-name";
+      fixture = "truncated-ci";
+      args = [ alpha ];
+      rc = 1;
+      wants = [ "ci/flake.lock is UNREADABLE as a flake lock" ];
+      forbids = [
+        "CONTROL FAILED"
+        "is not declared there; skipped"
+      ];
+      locks = "unchanged";
+    }
+    {
+      # ★ THE SITE BEHIND THE GATE. A lock that parses and has a root node, but whose inputs `has`
+      # cannot read: `hasInput`'s jq exit 5 must refuse, never read as false.
+      label = "an-unreadable-inputs-set-is-refused-not-read-as-undeclared";
+      fixture = "root-inputs-not-a-set";
+      args = [ alpha ];
+      rc = 1;
+      wants = [ "could not be read to decide whether ${alpha} is" ];
+      forbids = [
+        "is not declared there; skipped"
         "is not a declared input"
       ];
       locks = "unchanged";
