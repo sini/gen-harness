@@ -3,7 +3,6 @@
     "devshell": {
       "inputs": {
         "nixpkgs": [
-          "gen-harness",
           "nixpkgs"
         ]
       },
@@ -103,27 +102,6 @@
         "type": "github"
       }
     },
-    "gen-harness": {
-      "inputs": {
-        "devshell": "devshell",
-        "flake-parts": "flake-parts",
-        "flake-root": "flake-root",
-        "git-hooks-nix": "git-hooks-nix",
-        "import-tree": "import-tree",
-        "nix-unit": "nix-unit",
-        "nixpkgs": "nixpkgs",
-        "treefmt-nix": "treefmt-nix_2"
-      },
-      "locked": {
-        "path": "..",
-        "type": "path"
-      },
-      "original": {
-        "path": "..",
-        "type": "path"
-      },
-      "parent": []
-    },
     "gen-prelude": {
       "locked": {
         "lastModified": 1782849654,
@@ -176,7 +154,6 @@
       "inputs": {
         "flake-compat": "flake-compat",
         "nixpkgs": [
-          "gen-harness",
           "nixpkgs"
         ]
       },
@@ -213,7 +190,6 @@
     "nix-github-actions": {
       "inputs": {
         "nixpkgs": [
-          "gen-harness",
           "nix-unit",
           "nixpkgs"
         ]
@@ -236,7 +212,6 @@
       "inputs": {
         "nix-github-actions": "nix-github-actions",
         "nixpkgs": [
-          "gen-harness",
           "nixpkgs"
         ],
         "treefmt-nix": "treefmt-nix"
@@ -283,32 +258,24 @@
         "type": "github"
       }
     },
-    "nixpkgs_2": {
-      "locked": {
-        "lastModified": 1789684949,
-        "narHash": "sha256-TAKa57gfBM/9a4IZrFaIQZhnHs9mXIFPlZbYrvhnaMY=",
-        "rev": "e554fab72f81915600f3f449b786fd9af40439a5",
-        "type": "tarball",
-        "url": "https://releases.nixos.org/nixos/unstable/nixos-26.11pre1075591.e554fab72f81/nixexprs.tar.xz"
-      },
-      "original": {
-        "type": "tarball",
-        "url": "https://channels.nixos.org/nixos-unstable/nixexprs.tar.xz"
-      }
-    },
     "root": {
       "inputs": {
+        "devshell": "devshell",
+        "flake-parts": "flake-parts",
+        "flake-root": "flake-root",
         "gen-dispatch": "gen-dispatch",
-        "gen-harness": "gen-harness",
         "gen-prelude": "gen-prelude_2",
         "gen-select": "gen-select",
-        "nixpkgs": "nixpkgs_2"
+        "git-hooks-nix": "git-hooks-nix",
+        "import-tree": "import-tree",
+        "nix-unit": "nix-unit",
+        "nixpkgs": "nixpkgs",
+        "treefmt-nix": "treefmt-nix_2"
       }
     },
     "treefmt-nix": {
       "inputs": {
         "nixpkgs": [
-          "gen-harness",
           "nix-unit",
           "nixpkgs"
         ]
@@ -330,7 +297,6 @@
     "treefmt-nix_2": {
       "inputs": {
         "nixpkgs": [
-          "gen-harness",
           "nixpkgs"
         ]
       },

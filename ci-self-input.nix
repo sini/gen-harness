@@ -1,6 +1,12 @@
 # Oracle for the SELF-INPUT invariant: a member's `ci/` never tests a PUBLISHED COPY OF ITSELF.
 #
-# INVARIANT. No node in this repository's `ci/flake.lock` closure resolves to this repository.
+# INVARIANT. No node in this repository's `ci/flake.lock` closure resolves to this repository, and
+# none in its root `flake.lock` either. The root lock is in the domain because a `ci/` may evaluate
+# the root flake itself: the hub's ci reads it at its own locked identity (den-hoag-lbtnv D1), so the
+# root lock's nodes are in ci's evaluated closure while `ci/flake.lock` no longer holds a copy of
+# them. A self-node in a root lock is a violation for every member, so widening the domain reds none
+# that is clean — measured 2026-09-24 over the 31 local consumer root locks: 0 hits, with a planted
+# `github:sini/gen` node in the hub's root lock firing rc 1 in the same run.
 #
 # THE RULING IT ENCODES (owner, 2026-09-18): "for internal coherence the ci → root will always
 # diverge — and because of that ci in a module should always override its self-input", disambiguated
@@ -9,10 +15,8 @@
 # WHY. A `ci/` that pins its own repository from a forge puts TWO IDENTITY FORMULAS FOR ONE NODE in
 # a single evaluation — the working tree under test, and some published revision of it — and every
 # cell downstream of the pair then reports about a mixture rather than about the tree. The invariant
-# held across the ecosystem by accident until now: `gen-memo/ci/flake.nix:27` carries
-# `gen.flake = false`, which fetches the hub as a SOURCE TREE so its inputs are never resolved, and
-# that one line was the only thing keeping gen-memo out of its own ci closure. Nothing checked it,
-# and a relock is exactly the act that breaks it. This is that check.
+# held across the ecosystem by accident: nothing checked it, and a relock is exactly the act that
+# breaks it. This is that check.
 #
 # ★ MATCHED ON `locked.repo`, NEVER ON THE NODE LABEL. Labels are mangled by the locker, and the
 # mangling is live: this repository's own `ci/flake.lock` carries `gen-prelude` AND `gen-prelude_2`
@@ -26,11 +30,13 @@
 # `flake = false` node is unremarkable in itself and matters only if it resolves to this member —
 # `arm-self-flake-false` and `arm-clean-flake-false-other` are the two seeds that hold that apart.
 #
-# ★ A `path:` SELF-REFERENCE IS NOT A VIOLATION, and this repository is the case. `ci/flake.nix`
-# here declares `gen-harness.url = "path:.."`, which locks as `{ type = "path"; path = ".."; }` with
-# no `repo` at all: it is the working tree, which is the shape the invariant PRESCRIBES rather than
-# the one it forbids. `arm-clean-self-path` holds that, so a later reader cannot "fix" the predicate
-# into reding every consumer at once.
+# ★ A `path:` NODE IS NOT A VIOLATION. It locks as `{ type = "path"; path = ".."; }` with no `repo`
+# at all, so it names no repository and is outside the domain. The invariant PRESCRIBES no
+# mechanism: a `ci/` reaches its own tree by relative import (`import ../lib`, the majority form), by
+# `self.sourceInfo`, or, where the root flake itself is the subject, by reading it at `self`'s own
+# locked identity. No member uses `path:..` any more — Lix refuses that lock node — but
+# `arm-clean-self-path` holds it green, so a later reader cannot "fix" the predicate into reding a
+# shape that is the working tree rather than a published copy of it.
 #
 # ★ IT GATES. Per `den-hoag-6fmmb`'s criterion — a check whose red is cleared by a RULING must not
 # gate, one cleared by a FIX should — a self-input is cleared by a fix, so it belongs in the gating
@@ -81,8 +87,8 @@ let
       #   `git`                         -> the last path segment of `locked.url`, `.git` stripped.
       # Compared by EQUALITY on that segment and never by substring, so `gen-harness-x` and
       # `gen-harnes` are both misses. Every other type (`path`, `tarball`, `file`) names no
-      # repository and is not in the domain — which is why the `path:..` self-reference every
-      # consumer's `ci/` makes is silent here, and must stay silent.
+      # repository and is not in the domain — which is why a `path:..` self-reference, the working
+      # tree rather than a published copy, is silent here, and must stay silent.
       rc=0
       hits=$(jq -r --arg target "$target" '
         (.nodes // {})
@@ -250,8 +256,8 @@ let
       };
     }
     {
-      # The prescribed shape, held green so a later reader cannot "repair" the predicate into
-      # reding every consumer at once — every `ci/` reaches its own tree by `path:..`.
+      # A path node names no repository: the working tree, never a published copy. Held green so a
+      # later reader cannot "repair" the predicate into reding it.
       label = "clean-self-path";
       expect = 0;
       nodes = {
@@ -279,6 +285,14 @@ let
   hasLock = builtins.pathExists lockPath;
   liveLock = pkgs.writeText "${name}-ci-flake-lock.json" (
     if hasLock then builtins.readFile lockPath else mkLock { }
+  );
+
+  # The ROOT lock, the second subject (see the header). Absent is vacuous here too: a ci-only member
+  # has no root lock.
+  rootLockPath = "${root}/flake.lock";
+  hasRootLock = builtins.pathExists rootLockPath;
+  liveRootLock = pkgs.writeText "${name}-root-flake-lock.json" (
+    if hasRootLock then builtins.readFile rootLockPath else mkLock { }
   );
 
   readerLive = builtins.pathExists "${root}/ci/flake.nix";
@@ -329,16 +343,22 @@ pkgs.runCommand "${name}-ci-self-input"
     }
     ${armLines}
 
-    rc=0
-    ${bin} ${liveLock} ${lib.escapeShellArg name} || rc=$?
-    if [ "$rc" -eq 0 ]; then
-      echo "live:          no node in ci/flake.lock resolves to ${name}"
-    elif [ "$rc" -eq 2 ]; then
-      echo "CONTROL FAILED: the scanner could not read this repository's own ci/flake.lock" >&2
-      fail=1
-    else
-      fail=1
-    fi
+    live() {
+      label=$1
+      lock=$2
+      rc=0
+      ${bin} "$lock" ${lib.escapeShellArg name} || rc=$?
+      if [ "$rc" -eq 0 ]; then
+        echo "live:          no node in $label resolves to ${name}"
+      elif [ "$rc" -eq 2 ]; then
+        echo "CONTROL FAILED: the scanner could not read this repository's own $label" >&2
+        fail=1
+      else
+        fail=1
+      fi
+    }
+    live ci/flake.lock ${liveLock}
+    live flake.lock ${liveRootLock}
 
     [ "$fail" -eq 0 ] || exit 1
     touch $out

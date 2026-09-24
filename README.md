@@ -24,17 +24,16 @@ the harness plus the tools, with no library it did not ask for.
 {
   inputs = {
     gen-harness.url = "github:sini/gen-harness";
-    gen-schema.url = "path:..";
     nixpkgs.url = "https://channels.nixos.org/nixos-unstable/nixexprs.tar.xz";
   };
 
   outputs =
-    inputs@{ gen-harness, gen-schema, ... }:
+    inputs@{ gen-harness, ... }:
     gen-harness.lib.mkCi {
       inherit inputs;
       name = "gen-schema";
       testModules = ./tests;
-      specialArgs = { genSchema = gen-schema.lib; };
+      specialArgs = { genSchema = import ../lib; };
     };
 }
 ```
@@ -134,7 +133,8 @@ moved: of the four suites `nix eval ./ci#tests --apply builtins.attrNames` names
 about the harness and `dispatch-select-adapter` is the gen-dispatch × gen-select pairing, which
 declares both siblings as this flake's own inputs rather than either library's.
 
-It reaches `mkCi` through `gen-harness.url = "path:.."`: the harness tests itself with itself. The
+It reaches `mkCi` by applying `../flake.nix`'s own `outputs` to its ci inputs, never through a
+`path:..` input, which Lix refuses: the harness tests itself with itself. The
 consequence is stated rather than hidden — a change that stops `mkCi` evaluating takes its own
 suite down instead of reporting a red test. Indirect coverage is what catches that case today:
 every library in the ecosystem builds its suite from this repository.

@@ -236,8 +236,20 @@ pkgs.writeShellApplication {
     # The self-input predicate, run twice — once on the INCOMING state and once on the produced
     # one — because the two verdicts are different findings and a command that only checks its
     # output blames itself for a violation it inherited.
+    #
+    # ★ OVER BOTH LOCKS, the domain `ci-self-input.nix` states: a `ci/` that evaluates the root flake
+    # itself (the hub's) has the root lock's nodes in its closure while `ci/flake.lock` holds no copy
+    # of them, so a scan of the ci lock alone would pass a published self-copy the root lock carries.
+    # rc is the worst of the two, so a 2 (the scanner did not run) is never masked by a 0 or a 1.
     selfInput() {
-      ${scanner}/bin/${name}-ci-self-input "$1" ${name}
+      worst=0
+      for l in "$ciLock" "$rootLock"; do
+        [ -f "$l" ] || continue
+        one=0
+        ${scanner}/bin/${name}-ci-self-input "$l" ${name} || one=$?
+        if [ "$one" -gt "$worst" ]; then worst=$one; fi
+      done
+      return "$worst"
     }
 
     mode=''${1:-}
@@ -278,9 +290,9 @@ pkgs.writeShellApplication {
     # command through the devshell can write the violating node, and a post-only check would then
     # restore to a state that still violates while reporting that it had restored a clean one. (2)
     # Relocking on top of a violating closure buries the diagnosis under an unrelated node delta.
-    if [ -f "$ciLock" ]; then
+    if [ -f "$ciLock" ] || [ -f "$rootLock" ]; then
       rc=0
-      selfInput "$ciLock" || rc=$?
+      selfInput || rc=$?
       if [ "$rc" -eq 2 ]; then
         printf '%s: CONTROL FAILED — the self-input scanner did not run on the incoming lock.\n' "$self" >&2
         exit 2
@@ -395,8 +407,8 @@ pkgs.writeShellApplication {
         fi
 
         # ACT TWO — `./ci`, THROUGH THE NODE THAT CARRIES THE INPUT THERE. The sibling is usually
-        # not a direct input of the ci flake: it arrives under some parent (`gen-harness`, or a
-        # `path:..` back to the root), and naming it directly is the no-op of case 1 above. So the
+        # not a direct input of the ci flake: it arrives under some parent (`gen-harness`, say),
+        # and naming it directly is the no-op of case 1 above. So the
         # carrier is DERIVED — the ci flake's direct inputs whose own closure resolves this
         # repository — and the carrier is what gets updated.
         #
@@ -480,9 +492,9 @@ pkgs.writeShellApplication {
     # point of running it here is that the bad state never lands. The incoming state was checked
     # above, so a red here is one THIS COMMAND introduced and the restore returns a state known to
     # satisfy the invariant — which is why the message can say so.
-    if [ -f "$ciLock" ]; then
+    if [ -f "$ciLock" ] || [ -f "$rootLock" ]; then
       rc=0
-      selfInput "$ciLock" || rc=$?
+      selfInput || rc=$?
       if [ "$rc" -eq 2 ]; then
         printf '%s: CONTROL FAILED — the self-input scanner did not run; the locks are LEFT AS WRITTEN.\n' \
           "$self" >&2

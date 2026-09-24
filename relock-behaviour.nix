@@ -124,6 +124,21 @@ let
     self = ghNode fixtureName;
   };
 
+  # A ROOT lock that carries this repository while the ci lock is clean — the hub's shape since its
+  # ci reads the root flake at `self` (den-hoag-lbtnv D1): the root lock's nodes are in ci's closure
+  # and `ci/flake.lock` holds no copy of them.
+  dirtyRootLock =
+    mkLock
+      {
+        ${alpha} = alpha;
+        ${beta} = beta;
+      }
+      {
+        ${alpha} = ghNode alpha;
+        ${beta} = ghNode beta;
+        self = ghNode fixtureName;
+      };
+
   zeroInputFlake = "{ outputs = _: { }; }";
 
   # ★ EVERY FIXTURE CARRIES A `ci/flake.nix`, because every mkCi member does and a fixture without
@@ -143,6 +158,7 @@ let
   # ── THE FIXTURE SHAPES ──
   # `two-act`         root lock + ci lock, both clean — the ordinary member.
   # `dirty-ci`        the same, but its ci lock already resolves to itself.
+  # `dirty-root`      `two-act`, but its ROOT lock already resolves to itself.
   # `zero-input`      NO root lock and a flake declaring nothing — defect 2's shape, and the only
   #                   fixture here whose expected outcome is an ACT rather than a refusal. It
   #                   carries no ci lock either, so the act reduces to its announcement and the
@@ -158,6 +174,11 @@ let
     dirty-ci = {
       rootLock = declaredRootLock;
       ciLock = dirtyCiLock;
+      flake = declaredFlake;
+    };
+    dirty-root = {
+      rootLock = dirtyRootLock;
+      ciLock = cleanCiLock;
       flake = declaredFlake;
     };
     zero-input = {
@@ -333,6 +354,20 @@ let
       locks = "unchanged";
     }
     {
+      # The same incoming arm over the ROOT lock: a self-node there with the ci lock clean is still
+      # in the closure of a ci that evaluates the root flake, and still stops the command dead.
+      label = "an-incoming-self-input-in-the-root-lock-stops-the-command-dead";
+      fixture = "dirty-root";
+      args = [ ];
+      rc = 1;
+      wants = [
+        "SELF-INPUT"
+        "ALREADY in its own ci closure"
+      ];
+      forbids = [ "bumping every declared input" ];
+      locks = "unchanged";
+    }
+    {
       # ★ THE SAME CHECK, PROVEN TO DISCRIMINATE. `two-act` differs from `dirty-ci` in one node.
       # `--fresh` is used because it reaches PAST the incoming check before being refused, so a
       # clean fixture reaching the unknown-option branch is positive evidence the check passed
@@ -348,7 +383,7 @@ let
     {
       # ★ THE REPOSITORY IS DISCRIMINATED, NOT TAKEN ON FLAKE_ROOT'S WORD. The only arm here whose
       # `FLAKE_ROOT` points anywhere other than the fixture's true root, and it encodes the one
-      # shape the other eleven structurally cannot reach: `nix develop` entered from inside `ci/`,
+      # shape every other arm structurally cannot reach: `nix develop` entered from inside `ci/`,
       # where numtide-devshell sets `FLAKE_ROOT` to `<repo>/ci` rather than to `<repo>`.
       #
       # ★★ WHY `dirty-ci` AND `--fresh`, AND WHAT IT WOULD HAVE CAUGHT. Run against the command

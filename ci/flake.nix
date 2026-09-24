@@ -4,7 +4,26 @@
     # `gen-harness.lib.mkCi` is the subject. The oracle is therefore not independent — an mkCi that
     # cannot evaluate takes its own suite down instead of reporting a red test. Known and accepted;
     # hosting these suites in a harness-free flake is a later, separate decision.
-    gen-harness.url = "path:..";
+    #
+    # ★ THE SUBJECT IS READ BY RELATIVE PATH, NEVER AS A `path:..` INPUT. Lix refuses a relative
+    # `path` node in a lock ("mutable lock"), which took this whole plane down under Lix before a
+    # cell ran; and a Lix-written `path:..?narHash=…` lock pins a stale snapshot of the tree, which
+    # is a published copy of itself (den-hoag-lbtnv D1). So `outputs` below applies `../flake.nix`'s
+    # own `outputs` to the inputs declared here, and the harness's TOOL inputs are declared here,
+    # line for line as `../flake.nix` declares them — the majority form, the library's own
+    # dependencies re-declared on its test plane. `ci/tests/tool-agreement.nix` holds the two
+    # declarations and the two locks equal, because nothing else would see them drift.
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    flake-root.url = "github:srid/flake-root";
+    nix-unit.url = "github:nix-community/nix-unit";
+    nix-unit.inputs.nixpkgs.follows = "nixpkgs";
+    treefmt-nix.url = "github:numtide/treefmt-nix";
+    treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
+    devshell.url = "github:numtide/devshell";
+    devshell.inputs.nixpkgs.follows = "nixpkgs";
+    import-tree.url = "github:denful/import-tree/a164a12202f58eb67559bd33b5592f20660d9baf";
+    git-hooks-nix.url = "github:cachix/git-hooks.nix";
+    git-hooks-nix.inputs.nixpkgs.follows = "nixpkgs";
 
     # gen-prelude ENTERS HERE AND ONLY HERE — the test plane. The agreement suite compares the
     # vendored hasInfix (../prelude.nix) against the original, so the duplication is checked rather
@@ -26,7 +45,25 @@
   };
 
   outputs =
-    inputs@{ gen-harness, ... }:
+    ciInputs:
+    let
+      rootFlake = import ../flake.nix;
+      # The published surface of THIS tree: ../flake.nix's own `outputs`, applied to the inputs
+      # declared above. `sourceInfo` is this tree's, for the cells that read the harness's files.
+      gen-harness = rootFlake.outputs ciInputs // {
+        inherit (ciInputs.self) sourceInfo;
+        outPath = ciInputs.self.sourceInfo.outPath;
+      };
+      # ★ mkCi IS HANDED THE CONSUMER SHAPE: no tool input. Every consumer ci flake but the hub's
+      # and gen-flake's declares none (34 of 36 local, 2026-09-24), so they reach every tool through `resolve`'s fallback to `genInputs` (`mkCi.nix`,
+      # `flakeModule.nix`). Handing mkCi the tools declared above would send this suite down the
+      # other branch only, and a broken fallback would red every consumer with this repository
+      # green. `nixpkgs` stays: consumers declare it and mkCi reads it directly.
+      toolNames = builtins.filter (n: n != "nixpkgs") (builtins.attrNames rootFlake.inputs);
+      inputs = removeAttrs ciInputs toolNames // {
+        inherit gen-harness;
+      };
+    in
     gen-harness.lib.mkCi {
       inherit inputs;
       name = "gen-harness";
