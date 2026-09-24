@@ -25,6 +25,27 @@
 # already is — by the `Tests:` anchor, whose named cells re-verify on every run instead of resting
 # on a one-time eval. This check makes that anchor load-bearing by refusing to let it dangle.
 #
+# ★ A BARE COORDINATE STATES NO CONTENT, SO IN-RANGE DRIFT IS INVISIBLE TO IT. `path.nix:N` is
+# checked only for `N <= linecount`: a body that moved while the old number stays in range reads
+# green. The ANCHORED COORDINATE `path.nix:N:ident` (or `path.nix:N-M:ident`) attaches a content
+# predicate — `ident` must occur as a WHOLE IDENTIFIER on line N, the FIRST line of a range — and a
+# red names every line the anchor now sits on, which is the repair. Both forms are admitted; the
+# anchored one is the one that can see a move. Whether the bare form stays admitted is not this
+# check's decision.
+#
+# ★ WHAT THE ANCHOR DOES NOT BUY, stated so no reader over-reads a green. The predicate is
+# "this identifier is on that line", so it is exactly as strong as the anchor is rare:
+#   · MULTIPLICITY. An anchor that occurs on several lines false-greens any move that lands one of
+#     its other occurrences on N. Measured on this repository at `055d325`: with
+#     `flakeModule.nix:560:common_dir` cited, 16 lines inserted above `flakeModule.nix:544` put a
+#     different `common_dir` line at 560 and the span stayed GREEN, while 15 lines reds it. The
+#     row cited the `mv -f`, and `mv` would have caught both.
+#   · NO LEXICAL CONTEXT. A whole-identifier occurrence in a COMMENT or a STRING satisfies it, and
+#     so does a Nix KEYWORD (`inherit`), which carries almost no content.
+# So choose the token the row is ABOUT, and the rarer the better. The only claim this makes: an
+# anchored span is green only if its bare form would be AND its anchor is on line N, so its
+# greens are a subset of the bare form's and it never admits what the bare form refuses.
+#
 # ★ WHY A DERIVATION RATHER THAN A `nix-unit` CELL, since the ecosystem binds documents both ways.
 # The route is not the reason; the SUBJECT is. This check's subject is a FILE TREE, not a value: it
 # reads the whole tracked file list to resolve paths and count lines, and every `.nix` under `ci/`
@@ -181,12 +202,35 @@ let
     }
 
     # One candidate's verdict, as the token that goes inside the parentheses.
-    function verdict(f, kind, arg,   n) {
+    # An anchored coordinate's `arg` is `first SUBSEP highest SUBSEP ident`. The range is bounded
+    # at its highest endpoint exactly as a bare one is, BEFORE the anchor is read, so a span past
+    # the end of the file says so rather than that its line lacks the anchor.
+    function verdict(f, kind, arg,   n, q) {
       if (kind == "coord") {
         n = linecount(f)
         return (arg + 0 <= n) ? "ok" : ("file-has-" n "-lines")
       }
+      if (kind == "acoord") {
+        split(arg, q, SUBSEP); n = linecount(f)
+        if (q[2] + 0 > n) return "file-has-" n "-lines"
+        return online(f, q[1] + 0, q[3]) ? "ok" : ("anchor-not-on-line" anchorlines(f, q[3]))
+      }
       return hasname(f, arg) ? "ok" : "no-such-binding"
+    }
+
+    function online(f, ln, nm,   p, l, k, got) {
+      p = ROOT "/" f; k = 0; got = 0
+      while ((getline l < p) > 0) if (++k == ln) { got = wholeword(l, nm); break }
+      close(p)
+      return got
+    }
+
+    # The repair hint: every line the anchor now sits on, or that it sits on none.
+    function anchorlines(f, nm,   p, l, k, out) {
+      p = ROOT "/" f; k = 0; out = ""
+      while ((getline l < p) > 0) { k++; if (wholeword(l, nm)) out = out (out == "" ? ":" : ",") k }
+      close(p)
+      return (out == "" ? ";anchor-absent" : ";anchor-at" out)
     }
 
     # Resolve a path-bearing span. Returns "" when it resolves, else the parenthetical diagnosis.
@@ -224,13 +268,15 @@ let
       #
       # Disjointness, span by span: a cell name may not contain `.nix`; a file path may not
       # contain `:`; the first character after a coordinate's `:` is a digit and an anchor's is
-      # not; and a list needs a comma no other shape admits.
+      # not; a list needs a comma no other shape admits; and an anchored coordinate starts with a
+      # digit after its first `:` and carries a second `:` that no coordinate or list admits.
       PATHRE   = "[A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\\.nix"
       CELLRE   = "^([A-Za-z0-9_-]+\\.)?test-[A-Za-z0-9_'-]+$"
       FILERE   = "^" PATHRE "$"
       COORDRE  = "^" PATHRE ":[0-9]+(-[0-9]+)?$"
       ANCHORRE = "^" PATHRE ":[A-Za-z_'][A-Za-z0-9_'-]*$"
       LISTRE   = "^" PATHRE ":[0-9]+(-[0-9]+)?(, ?[0-9]+(-[0-9]+)?)+$"
+      ACOORDRE = "^" PATHRE ":[0-9]+(-[0-9]+)?:[A-Za-z_'][A-Za-z0-9_'-]*$"
       # The name alphabet, as a one-character class: the boundary `wholeword` reads. It is
       # CELLRE's own trailing class and ANCHORRE's, and those are the SAME set — which is what
       # lets one boundary serve both recognisers. All three have to stay the same set or a legal
@@ -337,6 +383,13 @@ let
             d = resolve(substr(span, 1, p - 1), "coord", maxline(substr(span, p + 1)), C)
             if (d != "" && !((span d) in SEEN)) { SEEN[span d] = 1; badCoords[++nBadC] = span d }
           }
+          else if (span ~ ACOORDRE) {
+            nACoords++
+            p = index(span, ":"); rest = substr(span, p + 1); r = index(rest, ":")
+            ln = substr(rest, 1, r - 1); split(ln, rg, "-")
+            d = resolve(substr(span, 1, p - 1), "acoord", rg[1] SUBSEP maxline(ln) SUBSEP substr(rest, r + 1), C)
+            if (d != "" && !((span d) in SEEN)) { SEEN[span d] = 1; badACoords[++nBadAC] = span d }
+          }
           else if (span ~ ANCHORRE) {
             nAnchors++
             p = index(span, ":")
@@ -364,13 +417,13 @@ let
       # actionable diagnostic with a message that is false on that input. `classified == 0` is
       # compatible with no other drift disposition, because each forces a classified counter above
       # zero by construction: badFiles ⇒ nFiles > 0, badCoords ⇒ nCoords + nList > 0,
-      # badAnchors ⇒ nAnchors > 0, badCells and badSuites ⇒ nCells > 0. So this is one conjunct
-      # and not a class, and the verdict is exit 1 either way — what it decides is which of two
-      # true things the operator is told.
-      classified = nCells + nFiles + nCoords + nAnchors + nList
+      # badACoords ⇒ nACoords > 0, badAnchors ⇒ nAnchors > 0, badCells and badSuites ⇒
+      # nCells > 0. So this is one conjunct and not a class, and the verdict is exit 1 either
+      # way — what it decides is which of two true things the operator is told.
+      classified = nCells + nFiles + nCoords + nAnchors + nList + nACoords
       if (classified == 0 && nUnc == 0)
         die("CONTROL FAILED: the declared region carries no classified citation (cells=0 files=0 " \
-            "coords=0 anchors=0 list=0); it asserts nothing this guard can check")
+            "coords=0 anchors=0 list=0 acoords=0); it asserts nothing this guard can check")
 
       # ── control: cells are cited, so a suite corpus must exist to resolve them against ──
       # Without this every cell reads as dangling and the count is an artefact of a missing tree.
@@ -420,9 +473,10 @@ let
       }
 
       summary = "cells=" nCells+0 " files=" nFiles+0 " coords=" nCoords+0 " anchors=" nAnchors+0 \
-                " list=" nList+0 " family=" nFamily+0 " prose=" nProse+0 " unclassified=" nUnc+0
+                " list=" nList+0 " family=" nFamily+0 " prose=" nProse+0 " unclassified=" nUnc+0 \
+                " acoords=" nACoords+0
 
-      if (nBadCe + nBadSu + nBadF + nBadC + nBadA + nUnc == 0) {
+      if (nBadCe + nBadSu + nBadF + nBadC + nBadAC + nBadA + nUnc == 0) {
         print "── " NAME "-agents-md-citations ──"
         print "region declared; " summary
         exit 0
@@ -435,6 +489,7 @@ let
       if (nBadSu) print "CITATION DRIFT -- cells the cited suite does not define: " join(badSuites, nBadSu) > "/dev/stderr"
       if (nBadF)  print "CITATION DRIFT -- files that do not exist: " join(badFiles, nBadF) > "/dev/stderr"
       if (nBadC)  print "CITATION DRIFT -- coordinates that do not resolve: " join(badCoords, nBadC) > "/dev/stderr"
+      if (nBadAC) print "CITATION DRIFT -- anchored coordinates that do not resolve: " join(badACoords, nBadAC) > "/dev/stderr"
       if (nBadA)  print "CITATION DRIFT -- binding anchors that do not resolve: " join(badAnchors, nBadA) > "/dev/stderr"
       print "Repair: fix the citation so it resolves against this repository's tree, or take the" > "/dev/stderr"
       print "span out of the region by giving it its own ATX section -- a visible structural act." > "/dev/stderr"
