@@ -59,7 +59,18 @@ let
   assertTests = lib.mapAttrsToList (
     suite: subtests:
     lib.mapAttrsToList (
-      testName: t: if t.expr == t.expected then true else throw (failMessage suite testName t)
+      testName: t:
+      # A cell carrying `expectedError` is on the wrong plane BY ITS OWN SHAPE, so this refusal needs
+      # no reasoning about whether the `expr` can abort: it names the cell and its destination before
+      # the `expr` is forced, instead of dying on the subject's own text with no coordinate. The
+      # reverse is NOT refused: an `expected` cell on `flake.testsError` is legitimate (a control
+      # has to run in the same invocation as the thing it controls).
+      if t ? expectedError then
+        throw "MISPLACED ${suite}.${testName}: a cell asserting an error belongs on flake.testsError (ci/tests-error.nix), not flake.tests -- this gate forces every expr and cannot hold one that aborts"
+      else if t.expr == t.expected then
+        true
+      else
+        throw (failMessage suite testName t)
     ) subtests
   ) tests;
 in
