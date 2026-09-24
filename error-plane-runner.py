@@ -84,7 +84,12 @@ def main():
     # Line 1 only: Lix prints several lines, upstream and Determinate one.
     print("evaluator: " + ver.stdout.splitlines()[0])
 
-    env = dict(os.environ, GEN_REF=f"git+file://{root}?dir=ci")
+    # `shallow=1` because CI checks out at depth 1, and the three evaluators DIVERGE on a shallow
+    # `git+file` ref without it: upstream accepts it, Determinate refuses ("'revCount' is not
+    # available") and Lix refuses ("shallow repositories are only allowed when `shallow = true;`").
+    # With it all three read the same tree, shallow or not (measured, gen-harness b60292b CI run
+    # 36045352952 and a local depth-1 clone).
+    env = dict(os.environ, GEN_REF=f"git+file://{root}?dir=ci&shallow=1")
     r = nix_eval(env, LIST)
     if r.returncode != 0:
         print("CONTROL FAILED: the error plane could not be listed:\n" + r.stderr[-2000:], file=sys.stderr)
