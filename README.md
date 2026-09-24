@@ -101,6 +101,36 @@ unknown option. Every lock is meant to point at the latest revision, so there is
 onto: use bare `relock` for one repository, and den-ag-design's `relock-all` to move the whole gen
 graph to its tips in dependency order.
 
+### The three-evaluator workflow
+
+The gen libraries must work under upstream Nix, Determinate Nix and Lix (owner ruling,
+2026-09-24), and the CI that holds them to it lives here, as one reusable workflow:
+
+```yaml
+jobs:
+  ci:
+    uses: sini/gen-harness/.github/workflows/evaluators.yml@<the gen-harness rev in ci/flake.lock>
+```
+
+Each of the three columns installs its own evaluator at a pinned version and runs the caller's
+`nix flake check` lines, evaluates the ci devShell (Determinate's `flake check` does not force it),
+and, where `ci/tests-error.nix` exists, runs the error plane through `ci --tests-error`. That
+devshell argument evaluates every `testsError` cell with the `nix` on `PATH`, one process per cell,
+because nix-unit is linked against one upstream nix-expr whatever evaluator is installed. The `nix`
+column also keeps the nix-unit step, which alone checks `expectedError.type`. Formatting runs once.
+
+A green column does not cover a check that evaluates inside its build sandbox through `pkgs.nix`:
+that evaluation is the same in all three columns.
+
+The sha is the harness the caller's `ci/flake.lock` holds, never `@main`: the workflow calls
+devshell commands from the locked harness, and a mismatch would put two versions of the harness in
+one run. `relock` rewrites the sha on every run it does not refuse, and `checks.ci-plane-coverage`
+refuses a skewed one. This repository calls the workflow locally.
+
+The pins are each evaluator's latest release. `./evaluator-pins.sh` compares them with the upstream,
+Determinate and Lix release feeds, and a pin behind is red in this repository's CI. It is a workflow
+job, not a flake check, because reading the latest release needs the network.
+
 ## The `genPrelude` surface, and the conformance rule
 
 Every suite receives `genPrelude`, and it carries **one attribute: `hasInfix`** — the
@@ -149,5 +179,6 @@ harness wires beside `ci` off the same guard. That holds whether they assert the
 ```
 nix-unit --flake ./ci#tests          # the suites
 nix-unit --flake ./ci#testsError     # the cells whose expr can abort
+nix develop ./ci -c ci --tests-error # the same cells, under the nix on PATH
 nix flake check                      # in ci/ — treefmt, tree-root oracle, hooks
 ```

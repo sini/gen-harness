@@ -6,20 +6,30 @@ on:
     branches: [main]
 
 jobs:
-  check:
+  # The three-evaluator matrix, called LOCALLY: a remote `@sha` self-call would run a published copy
+  # of this repository against its own tree, the two-identity defect `ci-self-input` exists for.
+  evaluators:
+    uses: ./.github/workflows/evaluators.yml
+
+  # The pins in `evaluators.yml` must be each evaluator's LATEST release (owner, "latest pins"):
+  # gating, and here rather than in the reusable workflow, so a new evaluator release reds the repo
+  # that holds the pins and never a caller. The arms re-prove each run that the reader can red and
+  # can say it could not measure — a reader only ever seen green is not shown to discriminate.
+  evaluator-pins:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ci
+        shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
-      - run: nix flake check
-      # `nix flake check` covers the `tests` output ONLY — the batch asserter behind
-      # `checks.default` quantifies over `flake.tests` and nothing else. The
-      # error-assertion cells live on `testsError` (`ci/tests-error.nix`), so without this
-      # step they never run here. nix-unit comes from the devshell, which is the flake's
-      # own LOCKED one rather than a floating ref.
-      - run: nix develop --command nix-unit --flake .#testsError
-      - run: nix fmt -- --ci
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: every pin is its evaluator's latest release
+        run: ./evaluator-pins.sh
+      - name: the reader reds a pin behind its latest, and names could-not-measure
+        run: |
+          behind=$RUNNER_TEMP/behind.yml
+          sed -E 's/^(  NIX_VERSION: ")[^"]*"/\12.35.1"/' .github/workflows/evaluators.yml > "$behind"
+          if cmp -s "$behind" .github/workflows/evaluators.yml; then echo "seed wrote nothing"; exit 1; fi
+          rc=0; ./evaluator-pins.sh "$behind" || rc=$?
+          [ "$rc" -eq 1 ]
+          rc=0; https_proxy=http://127.0.0.1:9 ./evaluator-pins.sh || rc=$?
+          [ "$rc" -eq 2 ]

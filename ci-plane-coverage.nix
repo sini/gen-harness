@@ -51,6 +51,12 @@
   # The flake's own evaluated error plane, `config.flake.testsError`: the sibling output, read from
   # inside the flake that defines it. The one input the reader cannot produce from text.
   testsError,
+  # The revision of the gen-harness this check was built FROM — `genInputs.self.sourceInfo.rev`,
+  # handed in by `flakeModule.nix`. A caller's `evaluators.yml@<sha>` must equal it, or the run mixes
+  # two identities of the harness (the workflow at one rev, the devshell commands it calls at
+  # another). `null` where the caller could not supply it (the hub's à-la-carte `lib.checks` route
+  # today): then any remote call is refused, because the equality cannot be decided.
+  harnessRev ? null,
 }:
 let
   inherit (pkgs) lib;
@@ -91,6 +97,67 @@ let
       builtins.length p > 1 # 3 the token, either spelling
       && builtins.match ".*[[:space:]]#.*" (builtins.head p) == null # 4 not a shell comment
     ) tokens;
+
+  # ── CALLS: the reusable three-evaluator workflow (den-hoag-lbtnv), a second RUNS predicate ──
+  # A job-level `uses:` of gen-harness's `evaluators.yml` runs the error plane on the same file
+  # predicate this check declares by (`hashFiles('ci/tests-error.nix')`), so for a DECLARER it counts
+  # as running it. For a NON-declarer it does not count as `runs-undeclared`: the call is conditional
+  # and runs nothing there. Lexical, like `runsLine`: the value is the whole `uses:` scalar, quotes
+  # and a trailing comment stripped. The LOCAL form counts only in a tree that itself carries
+  # `evaluators.yml` — gen-harness — because anywhere else it names a file that is not there.
+  callOf =
+    l:
+    let
+      t = trimLine l;
+      m = builtins.match "-?[[:space:]]*uses:[[:space:]]*['\"]?([^'\"[:space:]#]+)['\"]?([[:space:]]+#.*)?" t;
+      v = builtins.head m;
+      remote = builtins.match "sini/gen-harness/\\.github/workflows/evaluators\\.yml@([0-9a-f]{40})" v;
+    in
+    if m == null then
+      null
+    else if remote != null then
+      {
+        remote = true;
+        ref = builtins.head remote;
+      }
+    else if v == "./.github/workflows/evaluators.yml" then
+      {
+        remote = false;
+        ref = null;
+      }
+    else
+      null;
+  definesEvaluators = f: builtins.any (w: w.file == ".github/workflows/evaluators.yml") f.wfFiles;
+  # Every call line of a facts record, with its coordinate. A local call in a tree without the file
+  # is not a call.
+  callsOf =
+    f:
+    builtins.filter (c: c.remote || definesEvaluators f) (
+      lib.concatMap (
+        w:
+        lib.concatLists (
+          lib.imap1 (
+            line: text:
+            let
+              c = callOf text;
+            in
+            lib.optional (c != null) (
+              c
+              // {
+                inherit (w) file;
+                inherit line;
+              }
+            )
+          ) (lib.splitString "\n" w.text)
+        )
+      ) f.wfFiles
+    );
+  # The SKEWED calls: a remote ref other than the locked harness, and ANY remote call in a tree that
+  # defines the workflow itself — that tree would run a published copy of itself against its own
+  # tree, the two-identity defect `ci-self-input` exists for.
+  skewOf =
+    rev: f:
+    builtins.filter (c: c.remote && (rev == null || c.ref != rev || definesEvaluators f)) (callsOf f);
 
   # ── READER: the only half that touches the filesystem ──
   # facts = { name, hasWfDir, wfFiles = [ { file, text } ], planeText | null }. Files are kept
@@ -141,10 +208,12 @@ let
       ) f.wfFiles;
       hits = builtins.filter (w: runsLine w.text) lines;
       invoked = f.hasWfDir && hits != [ ];
+      calls = callsOf f;
+      called = f.hasWfDir && calls != [ ];
       state =
         if declares && !f.hasWfDir then
           "declares-no-workflow-dir"
-        else if declares && !invoked then
+        else if declares && !invoked && !called then
           "declares-unrun"
         else if declares then
           "runs"
@@ -157,11 +226,22 @@ let
     in
     {
       inherit (f) name;
-      inherit state declares invoked;
+      inherit
+        state
+        declares
+        invoked
+        called
+        ;
       # Root-relative, both halves, so a reader checks the row against the tree by `file:line`.
       witness = {
         plane = if declares then "ci/tests-error.nix" else null;
-        runs = if invoked then builtins.head hits else null;
+        runs =
+          if invoked then
+            builtins.head hits
+          else if declares && called then
+            builtins.head calls
+          else
+            null;
       };
     };
 
@@ -181,10 +261,12 @@ let
         n
     ) 0 (builtins.attrNames set);
 
-  live = classify (readOf {
+  liveFacts = readOf {
     inherit name;
     src = root;
-  });
+  };
+  live = classify liveFacts;
+  liveSkew = skewOf harnessRev liveFacts;
   liveCells = leafCount testsError;
 
   # ── ARMING: synthetic facts records, built here, disjoint from every live reading ──
@@ -195,6 +277,11 @@ let
     text =
       "jobs:\n  check:\n    steps:\n      - run: nix flake check\n"
       + lib.optionalString withStep "      - run: nix develop --command nix-unit --flake .#testsError\n";
+  };
+  armRev = "0123456789abcdef0123456789abcdef01234567";
+  seedCaller = rev: {
+    file = ".github/workflows/ci.yml";
+    text = "jobs:\n  ci:\n    uses: sini/gen-harness/.github/workflows/evaluators.yml@${rev} # the locked harness\n";
   };
   seeds = {
     runs = {
@@ -227,6 +314,39 @@ let
       wfFiles = [ ];
       planeText = null;
     };
+    # The CALLER shapes. `armRev` stands for the locked harness; no real revision is written here.
+    caller = {
+      name = "seed-caller";
+      hasWfDir = true;
+      wfFiles = [ (seedCaller armRev) ];
+      planeText = seedPlane;
+    };
+    caller-noplane = {
+      name = "seed-caller-noplane";
+      hasWfDir = true;
+      wfFiles = [ (seedCaller armRev) ];
+      planeText = null;
+    };
+    caller-skew = {
+      name = "seed-caller-skew";
+      hasWfDir = true;
+      wfFiles = [ (seedCaller (builtins.replaceStrings [ "0" ] [ "f" ] armRev)) ];
+      planeText = seedPlane;
+    };
+    # A tree that DEFINES the workflow and calls a published copy of it at the very rev it is
+    # locked to: refused anyway, because the rev being right does not make it one identity.
+    remote-self-call = {
+      name = "seed-remote-self-call";
+      hasWfDir = true;
+      wfFiles = [
+        (seedCaller armRev)
+        {
+          file = ".github/workflows/evaluators.yml";
+          text = "on:\n  workflow_call: {}\n";
+        }
+      ];
+      planeText = seedPlane;
+    };
     # The obt1y cell: the step stays, the plane file is gone.
     runs-undeclared = {
       name = "seed-runs-undeclared";
@@ -236,6 +356,7 @@ let
     };
   };
   arm = builtins.mapAttrs (_: classify) seeds;
+  armSkew = builtins.mapAttrs (_: skewOf armRev) seeds;
   armStates = lib.unique (map (r: r.state) (builtins.attrValues arm));
   # The leaf counter's seeds, of the same type as its live input. The real-shaped one exercises all
   # three behaviours: a prefixed leaf counts, a prefixed leaf is not descended into (`testTwo`
@@ -271,6 +392,7 @@ let
     # The universal positive control: the one file whose absence is impossible if this check is
     # evaluating from that flake at all. A blind reader, or a root one directory off, reds here.
     reader-live = builtins.pathExists "${root}/ci/flake.nix";
+    caller-ref-is-locked-harness = liveSkew == [ ];
     # The seed's step is its fifth line; the witness coordinate is armed with the state.
     arming-runs = arm.runs.state == "runs" && arm.runs.witness.runs.line == 5;
     arming-unrun = arm.unrun.state == "declares-unrun";
@@ -279,6 +401,12 @@ let
     arming-nowf-noplane = arm.nowf-noplane.state == "no-workflow-dir";
     arming-runs-undeclared = arm.runs-undeclared.state == "runs-undeclared";
     arming-empty-plane = leafCount armPlaneEmpty == 0 && leafCount armPlaneReal == 3;
+    # A caller is `runs` for a declarer and `no-plane` for a non-declarer — never runs-undeclared.
+    arming-caller = arm.caller.state == "runs" && arm.caller.witness.runs.line == 3;
+    arming-caller-noplane = arm.caller-noplane.state == "no-plane";
+    arming-caller-at-locked-rev = armSkew.caller == [ ];
+    arming-caller-skew = builtins.length armSkew.caller-skew == 1;
+    arming-remote-self-call = builtins.length armSkew.remote-self-call == 1;
     arming-covers-states = lib.sort lib.lessThan armStates == lib.sort lib.lessThan states;
   };
   gateKeys = builtins.attrNames gate;
@@ -290,6 +418,7 @@ let
     no-undeclared-runner = "a workflow step invokes testsError and ci/tests-error.nix does not exist: the plane was renamed or removed while its step stayed. Restore the file or remove the step; a plane living on under another name is undeclared.";
     plane-non-vacuous = "ci/tests-error.nix is declared and the evaluated testsError holds 0 test-prefixed leaves: nix-unit would report 0/0 and exit 0, the false pass. Give the plane a cell or retire the file.";
     reader-live = "the reader cannot see ci/flake.nix under its root: the check is bound to the wrong tree. `root` must be inputs.self.sourceInfo.outPath.";
+    caller-ref-is-locked-harness = "a `uses: sini/gen-harness/.github/workflows/evaluators.yml@<sha>` line names a revision other than the gen-harness this ci is locked to (${toString harnessRev}), or this tree defines evaluators.yml itself and calls a published copy. Run `relock`, which rewrites the sha to the locked rev; gen-harness calls its own workflow locally (`uses: ./.github/workflows/evaluators.yml`).";
   };
   armingRepair = "an arming cell stopped firing: the classifier or the leaf counter no longer discriminates the state its seed encodes. A guard that can no longer refuse is not a passing guard; repair the predicate, never the seed.";
 
@@ -302,6 +431,8 @@ let
       ;
     row = live;
     cells = liveCells;
+    inherit harnessRev;
+    skew = liveSkew;
     arming = builtins.mapAttrs (_: r: r.state) arm;
     armingCells = {
       empty = leafCount armPlaneEmpty;
@@ -320,6 +451,8 @@ pkgs.runCommand "${name}-ci-plane-coverage"
         readOf
         classify
         runsLine
+        callOf
+        skewOf
         leafCount
         gate
         gateKeys

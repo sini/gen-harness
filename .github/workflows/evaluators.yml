@@ -1,0 +1,186 @@
+# THE THREE-EVALUATOR MATRIX — one reusable workflow every gen repository calls (den-hoag-lbtnv).
+#
+# Owner rulings, 2026-09-24: the libraries must work under upstream Nix, Determinate Nix and Lix;
+# the CI for that lives here, in gen-harness; each evaluator is pinned to an exact version held at
+# that evaluator's LATEST release ("latest pins"). A caller writes
+#
+#   jobs:
+#     ci:
+#       uses: sini/gen-harness/.github/workflows/evaluators.yml@<the gen-harness rev in ci/flake.lock>
+#
+# and `relock` keeps that sha equal to the lock; `ci-plane-coverage`'s
+# `caller-ref-is-locked-harness` refuses a skew. gen-harness calls this file LOCALLY
+# (`uses: ./.github/workflows/evaluators.yml`), never at a published sha of itself.
+#
+# ★ WHAT A GREEN COLUMN COVERS. Each column's own `nix` evaluates, in-process: every `nix flake
+# check` line (so `checks.default`, the batch asserter over `flake.tests`, and every check's
+# derivation), the ci devShell, and the error plane through `ci --tests-error`.
+# ★ WHAT IT DOES NOT COVER: a check that runs `nix-instantiate`/`nix eval` INSIDE its build sandbox
+# evaluates with the ci-locked nixpkgs `pkgs.nix`, identically in all three columns — its drvPath is
+# the same under all three evaluators. gen-scope's `checks.tests-process` is the measured member
+# (den-hoag-jutgv); gen-harness's own `relock-behaviour` runs `pkgs.nix` in its sandbox too. A Lix or
+# Determinate green is NOT a claim about the cells such a check evaluates.
+#
+# ★ THE `nix` COLUMN CAN RUN TWO UPSTREAM VERSIONS. Its evaluator is NIX_VERSION below; its extra
+# `nix-unit` step — kept because it alone checks `expectedError.type` — is nix-unit's own binary,
+# linked against the upstream nix-expr of the CALLER's ci-locked nixpkgs, whatever the column
+# installs. Measured at gen-harness's own lock (2026-09-24): nix-unit 2.35.1 on nix-expr 2.35.2.
+#
+# The pins are read against their evaluators' latest releases by `evaluator-pins.sh`, a GATING job
+# of gen-harness's own CI: a pin behind its latest release reds gen-harness, and a bump reaches a
+# caller through its relock.
+name: evaluators
+
+on:
+  workflow_call:
+    inputs:
+      flake-checks:
+        description: One `nix flake check` argument line per line, run from the repository root.
+        type: string
+        default: "./ci --keep-going"
+      extra-run:
+        description: The caller's evaluator-sensitive steps, run in every column from the root.
+        type: string
+        default: ""
+      fmt-directory:
+        description: Where `nix fmt -- --ci` runs.
+        type: string
+        default: ci
+
+# ★ THE ONE PLACE THE THREE EVALUATORS ARE PINNED.
+env:
+  NIX_VERSION: "2.35.2" # latest: https://nixos.org/nix/install -> releases.nixos.org/nix/nix-<v>/install
+  DETERMINATE_VERSION: "3.22.5" # latest: github.com/DeterminateSystems/nix-installer/releases/latest
+  LIX_VERSION: "2.95.3" # latest: https://releases.lix.systems/manifest.nix
+  LIX_TARBALL_SHA256: "84a25e2adef9540fa61f77f5ed998c36337751ca27cea6aa6438f83eb38bf0d3"
+  # The installer is not the evaluator: lix-installer 3.95.0, from an immutable versioned path, told
+  # which Lix to install by `--nix-package-url`.
+  LIX_INSTALLER_URL: "https://install.lix.systems/lix/2.95.2/lix-installer-x86_64-linux"
+  LIX_INSTALLER_SHA256: "57564e78a6d57126661fe5e793de70a72bacf9835ddb7c5c0cbfadf3db21545e"
+
+jobs:
+  evaluate:
+    name: ${{ matrix.evaluator }}
+    runs-on: ubuntu-latest
+    strategy:
+      # A red column must never cancel the other two: attribution is the point of the matrix.
+      fail-fast: false
+      matrix:
+        evaluator: [nix, determinate, lix]
+    defaults:
+      run:
+        # `bash -eo pipefail`, not the default `bash -e`: a `| tee` must not mask a red.
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: install upstream Nix ${{ env.NIX_VERSION }}
+        if: matrix.evaluator == 'nix'
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+        with:
+          install_url: https://releases.nixos.org/nix/nix-${{ env.NIX_VERSION }}/install
+          github_access_token: ${{ github.token }}
+
+      - name: install Determinate Nix ${{ env.DETERMINATE_VERSION }}
+        if: matrix.evaluator == 'determinate'
+        uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          source-tag: v${{ env.DETERMINATE_VERSION }}
+          # Stated, never inherited from an install default: lazy-trees is the Determinate-specific
+          # path, and the one measured Determinate divergence (gen-demo C53) was on it.
+          extra-conf: lazy-trees = true
+
+      - name: install Lix ${{ env.LIX_VERSION }}
+        if: matrix.evaluator == 'lix'
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP"
+          curl -sSfL -o lix.tar.xz "https://releases.lix.systems/lix/lix-$LIX_VERSION/lix-$LIX_VERSION-x86_64-linux.tar.xz"
+          echo "$LIX_TARBALL_SHA256  lix.tar.xz" | sha256sum -c
+          curl -sSfL -o lix-installer "$LIX_INSTALLER_URL"
+          echo "$LIX_INSTALLER_SHA256  lix-installer" | sha256sum -c
+          chmod +x lix-installer
+          sudo ./lix-installer install linux --no-confirm \
+            --nix-package-url "file://$RUNNER_TEMP/lix.tar.xz" \
+            --extra-conf "access-tokens = github.com=$TOKEN" \
+            --extra-conf "trusted-users = root $USER"
+          echo /nix/var/nix/profiles/default/bin >> "$GITHUB_PATH"
+
+      - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
+        # A cache is not an evaluator: if it cannot start under a column's install, that column must
+        # not red for it — a false evaluator attribution is the one thing this matrix exists to avoid.
+        continue-on-error: true
+
+      - name: evaluator identity
+        run: |
+          line=$(nix --version | sed -n 1p)
+          echo "evaluator: $line"
+          case "${{ matrix.evaluator }}" in
+            nix) want="nix (Nix) $NIX_VERSION" ;;
+            determinate) want="nix (Determinate Nix $DETERMINATE_VERSION) "'*' ;;
+            lix) want="nix (Lix, like Nix) $LIX_VERSION" ;;
+          esac
+          # shellcheck disable=SC2254
+          case "$line" in
+            $want) ;;
+            *) echo "::error::the ${{ matrix.evaluator }} column runs '$line', not its pin '$want'"; exit 1 ;;
+          esac
+          if [ "${{ matrix.evaluator }}" = determinate ]; then
+            lt=$(nix config show lazy-trees)
+            echo "lazy-trees = $lt; eval-cores = $(nix config show eval-cores)"
+            [ "$lt" = true ] || { echo "::error::Determinate is running with lazy-trees = $lt"; exit 1; }
+          fi
+
+      - name: flake checks
+        env:
+          FLAKE_CHECKS: ${{ inputs.flake-checks }}
+        run: |
+          rc=0
+          while IFS= read -r args; do
+            [ -n "$args" ] || continue
+            echo "::group::nix flake check $args"
+            # shellcheck disable=SC2086
+            nix flake check $args || rc=1
+            echo "::endgroup::"
+          done <<< "$FLAKE_CHECKS"
+          exit "$rc"
+
+      # Determinate's `nix flake check` does not force devShells (hindsight b9145c57), so a
+      # devShell-only defect would be invisible to that column without this.
+      - name: ci devShell
+        if: hashFiles('ci/flake.nix') != ''
+        run: |
+          sys=$(nix eval --impure --raw --expr builtins.currentSystem)
+          nix eval --raw "./ci#devShells.$sys.default.drvPath"
+          echo
+
+      - name: error plane, by message (ci --tests-error)
+        if: hashFiles('ci/tests-error.nix') != ''
+        run: |
+          nix develop ./ci --command ci --tests-error | tee "$RUNNER_TEMP/tests-error.log"
+          # The runner must have judged the plane with THIS column's evaluator.
+          grep -Fxq "evaluator: $(nix --version | sed -n 1p)" "$RUNNER_TEMP/tests-error.log"
+
+      - name: error plane, by type (nix-unit, on the ci-locked upstream nix-expr)
+        if: matrix.evaluator == 'nix' && hashFiles('ci/tests-error.nix') != ''
+        run: nix develop ./ci --command nix-unit --flake ./ci#testsError
+
+      - name: extra
+        if: inputs.extra-run != ''
+        env:
+          EXTRA_RUN: ${{ inputs.extra-run }}
+        run: bash -eo pipefail -c "$EXTRA_RUN"
+
+  fmt:
+    # Once, not per column: formatting is not an evaluator property.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+        with:
+          source-tag: v${{ env.DETERMINATE_VERSION }}
+      - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
+        continue-on-error: true
+      - run: nix fmt -- --ci
+        working-directory: ${{ inputs.fmt-directory }}

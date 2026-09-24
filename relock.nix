@@ -53,6 +53,7 @@ pkgs.writeShellApplication {
     pkgs.jq
     pkgs.coreutils
     pkgs.git
+    pkgs.gnused
   ];
   text = ''
     self=${name}-relock
@@ -71,6 +72,8 @@ pkgs.writeShellApplication {
         "When nodes actually move, the pre-commit hook is REINSTALLED and the formatter is" \
         "APPLIED, because both are pinned by the locks just bumped and neither follows on its" \
         "own. THIS REWRITES SOURCE. A run that moves nothing, and every refusal, does neither." \
+        "A workflow calling gen-harness's evaluators.yml@<sha> is rewritten to the locked rev" \
+        "on every run that is not refused." \
         "" \
         "relock --hub is RETIRED (it pinned inputs to the hub's revisions). Use bare relock for this" \
         "repository, and den-ag-design's relock-all to move the whole gen graph to its tips." >&2
@@ -516,6 +519,40 @@ pkgs.writeShellApplication {
           "lock it touched has been RESTORED to the state before the command ran, which the same" \
           "check passed." >&2
         exit 1
+      fi
+    fi
+
+    # ★ A CALLER'S WORKFLOW REF FOLLOWS THE LOCK, AND ONLY FROM HERE. A member calling gen-harness's
+    # three-evaluator workflow names it `evaluators.yml@<sha>`, and that sha must be the gen-harness
+    # its `ci/flake.lock` holds — else one run mixes two identities of the harness (the workflow at one
+    # rev, the devshell commands it calls at another), which `ci-plane-coverage`'s
+    # `caller-ref-is-locked-harness` refuses. It is rewritten HERE, on the success path AFTER the
+    # produced-tree check above, because that check restores ONLY the two locks: a rewrite placed
+    # earlier would survive a refusal and leave a workflow naming a rev its lock no longer has
+    # (gate den-hoag-lbtnv C2). It runs whether or not a node moved, so it also repairs a hand
+    # `nix flake update` that skipped it. The rev is read BY NODE PATH from the root's inputs, with
+    # `follows` resolved — a scan for `repo == "gen-harness"` finds several revisions, one per
+    # member that carries it transitively.
+    if [ -f "$ciLock" ] && [ -d "$root/.github/workflows" ]; then
+      hrev=$(jq -r '
+        def node($d; $k):
+          if ($k | type) == "string" then $k
+          elif ($k | type) == "array" then
+            reduce $k[] as $n ($d.root // "root"; node($d; $d.nodes[.].inputs[$n]))
+          else null end;
+        . as $d
+        | node($d; $d.nodes[$d.root // "root"].inputs["gen-harness"]) as $k
+        | if $k == null then "" else ($d.nodes[$k].locked.rev // "") end' "$ciLock")
+      if [ -n "$hrev" ]; then
+        for wf in "$root"/.github/workflows/*.yml "$root"/.github/workflows/*.yaml; do
+          [ -f "$wf" ] || continue
+          before=$(md5sum < "$wf")
+          sed -E -i "s#(sini/gen-harness/\.github/workflows/[^@[:space:]]+@)[0-9a-f]{40}#\1$hrev#g" "$wf"
+          if [ "$(md5sum < "$wf")" != "$before" ]; then
+            printf '%s: %s now calls the gen-harness workflow at the locked rev %s\n' \
+              "$self" "''${wf#"$root"/}" "$hrev"
+          fi
+        done
       fi
     fi
 

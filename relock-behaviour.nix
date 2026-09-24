@@ -33,7 +33,9 @@
 #     not the act),
 #   · the accepting half of the named-input refusal — asserted on its MESSAGE rather than its exit,
 #     since the exit belongs to the act,
-#   · defect 3's restore, whose post-act check can only fire on a lock the act has just written.
+#   · defect 3's restore on a REAL act. Its post-act check is driven here only through `stubUpdate`,
+#     a `nix` whose `flake update` writes a staged lock offline — the command's half after the act,
+#     not the act itself (added for den-hoag-lbtnv C2, the caller-workflow rewrite).
 # The live acts are exercised by the owner running the command, which is where all three defects
 # came from and remains the acceptance.
 #
@@ -139,6 +141,44 @@ let
         self = ghNode fixtureName;
       };
 
+  # ── THE CALLER SHAPE (den-hoag-lbtnv C2). A ci lock carrying `gen-harness` at `lockedRev`, and a
+  # workflow calling the harness's `evaluators.yml` at a STALE rev. All three revs are synthetic.
+  staleRev = "1111111111111111111111111111111111111111";
+  lockedRev = "2222222222222222222222222222222222222222";
+  movedRev = "3333333333333333333333333333333333333333";
+  harnessAt = rev: {
+    locked = {
+      type = "github";
+      owner = "sini";
+      repo = "gen-harness";
+      inherit rev;
+    };
+  };
+  callerCiLock =
+    mkLock
+      {
+        ${alpha} = alpha;
+        gen-harness = "gen-harness";
+      }
+      {
+        ${alpha} = ghNode alpha;
+        gen-harness = harnessAt lockedRev;
+      };
+  # What a bump that dragged this repository into its own closure writes: the harness moved AND a
+  # self node appeared. The produced-tree check must refuse it and restore the locks.
+  callerDirtyCiLock =
+    mkLock
+      {
+        ${alpha} = alpha;
+        gen-harness = "gen-harness";
+      }
+      {
+        ${alpha} = ghNode alpha;
+        gen-harness = harnessAt movedRev;
+        self = ghNode fixtureName;
+      };
+  callerWorkflow = "jobs:\n  ci:\n    uses: sini/gen-harness/.github/workflows/evaluators.yml@${staleRev}\n";
+
   zeroInputFlake = "{ outputs = _: { }; }";
 
   # ★ EVERY FIXTURE CARRIES A `ci/flake.nix`, because every mkCi member does and a fixture without
@@ -207,6 +247,12 @@ let
       rootLock = declaredRootLock;
       ciLock = builtins.substring 0 40 cleanCiLock;
       flake = declaredFlake;
+    };
+    caller = {
+      rootLock = declaredRootLock;
+      ciLock = callerCiLock;
+      flake = declaredFlake;
+      workflow = callerWorkflow;
     };
     # WELL-FORMED down to its root node, whose `inputs` is not a set: it passes the readability
     # gate and reaches `hasInput`, whose `has` then fails — the site behind the gate.
@@ -508,6 +554,36 @@ let
       locks = "unchanged";
     }
     {
+      # ★ THE ACT, DRIVEN OFFLINE. `stubUpdate` puts a `nix` on PATH whose `flake update` writes the
+      # given ci lock (or nothing, when it is empty) and which refuses every other verb, so the
+      # post-act half of the command runs with no network. Here it writes nothing: the locks are
+      # already where they belong, and the stale workflow ref must be rewritten to the ci lock's rev.
+      label = "a-successful-relock-rewrites-the-caller-ref-to-the-locked-harness";
+      fixture = "caller";
+      args = [ ];
+      stubUpdate = "";
+      rc = 0;
+      wants = [ "now calls the gen-harness workflow at the locked rev ${lockedRev}" ];
+      forbids = [ "REFUSED" ];
+      locks = "any";
+      workflowHas = "evaluators.yml@${lockedRev}";
+    }
+    {
+      # ★ GATE C2, AND DEFECT 3's RESTORE, which no arm could reach before `stubUpdate`. The bump
+      # writes a ci lock that resolves this repository; the produced-tree check refuses and restores
+      # the locks — and the workflow must be UNTOUCHED, because the restore covers only the locks. A
+      # ref rewrite placed before that check leaves `ci.yml` at the moved rev while its lock goes
+      # back, and the whole-tree digest reds on exactly that.
+      label = "a-refused-relock-leaves-the-caller-workflow-untouched";
+      fixture = "caller";
+      args = [ ];
+      stubUpdate = callerDirtyCiLock;
+      rc = 1;
+      wants = [ "REFUSED — this relock would have put this repository into its own ci closure" ];
+      forbids = [ "now calls the gen-harness workflow" ];
+      locks = "unchanged";
+    }
+    {
       # `--help` must not depend on a lock being well-formed, which is why it is handled before
       # anything is read. Held on the fixture whose lock is a refusal.
       label = "help-does-not-depend-on-the-lock";
@@ -521,6 +597,20 @@ let
   ];
 
   sh = lib.escapeShellArg;
+
+  # The `nix` an arm with `stubUpdate` runs: `flake update … --flake <dir>` copies the staged lock
+  # into a `ci` dir when one is staged, and every other verb is refused loudly — so an arm that
+  # reached an act nobody staged fails by name instead of silently succeeding.
+  stubNix = pkgs.writeShellScript "nix" ''
+    if [ "$1 $2" != "flake update" ]; then
+      echo "stub nix: unexpected invocation: $*" >&2
+      exit 97
+    fi
+    for a; do d=$a; done
+    case "$d" in
+    */ci) if [ -s "$STUB_CI_LOCK" ]; then cp "$STUB_CI_LOCK" "$d/flake.lock"; fi ;;
+    esac
+  '';
 
   mkFixture =
     fname:
@@ -546,6 +636,10 @@ let
         ${f.ciLock}
         FIXTURE_CI_LOCK
       ''}
+      ${lib.optionalString (f ? workflow) ''
+        mkdir -p "$TMP/fix/.github/workflows"
+        printf '%s' ${sh f.workflow} > "$TMP/fix/.github/workflows/ci.yml"
+      ''}
       # The pre-state, as a DIGEST MANIFEST rather than a file comparison: a command that writes and
       # then restores returns the bytes it started with, and only a digest taken around the whole
       # invocation can tell "never written" from "written and put back". Both readings matter here,
@@ -569,8 +663,15 @@ let
     in
     ''
       ${mkFixture arm.fixture}
+      armPath=$PATH
+      ${lib.optionalString (arm ? stubUpdate) ''
+        rm -rf "$TMP/stub" && mkdir -p "$TMP/stub"
+        printf '%s' ${sh arm.stubUpdate} > "$TMP/stub/ci.lock"
+        ln -s ${stubNix} "$TMP/stub/nix"
+        armPath=$TMP/stub:$PATH
+      ''}
       rc=0
-      FLAKE_ROOT="${arm.flakeRoot or "$TMP/fix"}" ${relock}/bin/${fixtureName}-relock ${
+      PATH=$armPath STUB_CI_LOCK="$TMP/stub/ci.lock" FLAKE_ROOT="${arm.flakeRoot or "$TMP/fix"}" ${relock}/bin/${fixtureName}-relock ${
         lib.concatMapStringsSep " " sh arm.args
       } > "$TMP/out" 2>&1 || rc=$?
 
@@ -586,6 +687,11 @@ let
         if ! diff -q "$TMP/pre.md5" "$TMP/post.md5" > /dev/null; then
           fail ${sh arm.label} "the tree changed and this arm writes nothing:
         $(diff "$TMP/pre.md5" "$TMP/post.md5" || true)"
+        fi
+      ''}
+      ${lib.optionalString (arm ? workflowHas) ''
+        if ! grep -qF -- ${sh arm.workflowHas} "$TMP/fix/.github/workflows/ci.yml"; then
+          fail ${sh arm.label} "the caller workflow does not name ${arm.workflowHas}"
         fi
       ''}
       ${lib.optionalString (arm.noRootLockCreated or false) ''

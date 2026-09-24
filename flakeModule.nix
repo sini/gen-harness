@@ -465,6 +465,9 @@ in
         checks.ci-plane-coverage = import ./ci-plane-coverage.nix {
           inherit pkgs name testsError;
           root = inputs.self.sourceInfo.outPath;
+          # The harness THIS ci is built from, so a caller's `evaluators.yml@<sha>` is held to it.
+          # `genInputs` is the harness flake's own inputs, whose `self` is the locked gen-harness.
+          harnessRev = genInputs.self.sourceInfo.rev or null;
         };
 
         # A member's `ci/` never tests a PUBLISHED COPY OF ITSELF. Bound in the `let` above because
@@ -575,7 +578,7 @@ in
           commands = [
             {
               name = "ci";
-              help = "Run all checks, or a specific test [ci] [ci suite] [ci suite.test]";
+              help = "Run all checks, or a specific test [ci] [ci suite] [ci suite.test] [ci --tests-error]";
               command = ''
                 # The read-roots guard runs BEFORE nix-unit at all three invocation points the
                 # harness itself wires — this one and the two pre-commit hooks — because a hole at
@@ -593,6 +596,16 @@ in
                 # and passed at rc=0 while the suite reported a green for this one. `fmt` below
                 # already states its directory for the same reason.
                 cd "$FLAKE_ROOT" && "${readRootsGuard}/bin/${name}-ci-read-roots" || exit $?
+
+                # `ci --tests-error`: the error plane judged by the `nix` on PATH, not by the
+                # nix-expr nix-unit links — the evaluator-neutral runner a matrix column needs
+                # (`error-plane-runner.py` states its predicate). An ARGUMENT of this command rather
+                # than a command of its own, and a flag rather than a word so it can never shadow a
+                # suite name. It runs AFTER the guard above, as every wired testsError invocation
+                # must (den-hoag-a0ig9): an untracked cell file is as invisible to it as to nix-unit.
+                if [ "''${1:-}" = "--tests-error" ]; then
+                  exec ${pkgs.python3}/bin/python3 ${./error-plane-runner.py} "$FLAKE_ROOT"
+                fi
 
                 # A `suite.test` arg must target the `testSingletons` view: nix-unit treats the attrpath
                 # endpoint as a GROUP and detects tests by the `test` name-prefix of a group child, so
