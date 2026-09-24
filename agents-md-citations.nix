@@ -33,6 +33,12 @@
 # anchored one is the one that can see a move. Whether the bare form stays admitted is not this
 # check's decision.
 #
+# ★ A NAME CITATION `path.nix:name` CLAIMS A DEFINITION, NOT AN OCCURRENCE: it resolves only on a
+# line where the name stands in a BINDER position, so a mention in prose, a use site or a builtin
+# does not resolve it. The binder forms, the fail-closed forms and the fail-open residual are stated
+# at `binds` in the classifier. A use site is cited as the anchored coordinate above, which stays an
+# occurrence check because it claims a location, not a definition.
+#
 # ★ WHAT THE ANCHOR DOES NOT BUY, stated so no reader over-reads a green. The predicate is
 # "this identifier is on that line", so it is exactly as strong as the anchor is rare:
 #   · MULTIPLICITY. An anchor that occurs on several lines false-greens any move that lands one of
@@ -97,13 +103,70 @@ let
 
     function hasname(f, nm,   p, l, got) {
       p = ROOT "/" f; got = 0
-      while ((getline l < p) > 0) if (wholeword(l, nm)) { got = 1; break }
+      while ((getline l < p) > 0) if (binds(l, nm)) { got = 1; break }
       close(p)
       return got
     }
 
-    # ★ A CITED NAME RESOLVES AS A WHOLE IDENTIFIER, NEVER AS A SUBSTRING — a cell and a binding
-    # anchor alike, which is why this is one predicate and not two. `index()` answers "does this
+    # ★ A NAME CITATION CLAIMS A DEFINITION, SO IT RESOLVES ON A BINDER, NEVER ON A MENTION.
+    # `path.nix:name` reads "name is BOUND in path" — the form is called a binding anchor and its
+    # failure `no-such-binding` — and the evidence it offers is the binding. A mention in a comment
+    # or a string is not that evidence: with the binding renamed, header prose still saying the
+    # old name kept the citation green. The boundary is `wholeword`'s; what is added is the
+    # POSITION, read line-locally and syntactically. nm is a binder on a line when:
+    #   · (i)   the line is a one-line `inherit` and nm is among the names after the optional
+    #           `(source)` and before the `;` — never the source, never a trailing comment;
+    #   · (ii)  nm is followed by `=` (not `==`), at ANY component of the left-hand attrpath, quoted
+    #           or not, because `a.nm = v` is `a = { nm = v; }`;
+    #   · (iii) nm is followed by `?` and preceded by `{`, `,` or only whitespace — a formal with a
+    #           default, and not the hasAttr operator `x ? nm` or `nm ? attr`;
+    #   · (iv)  nm stands alone on its line followed by `,` — a formal in the formatter's
+    #           one-per-line layout.
+    # Test (ii) is a whole word followed by `=`, and that is ALL it tests: a shell `nm=` inside a
+    # Nix string satisfies it exactly as a Nix binding does, because a line-local reader cannot
+    # tell the two apart. It is admitted as that syntactic coincidence, not as "a definition in
+    # the program the file ships" — which would equally admit a devshell command's
+    # `name = "repl";`, a string value this refuses.
+    #
+    # FAIL-CLOSED, each a red naming the span and never a false green: a lambda formal `nm:`, a
+    # multi-line `inherit`, a one-line formal set `{ a, nm, ... }:`, `nm@{` and `{ … }@nm`, a
+    # binding whose `=` sits on the next line, and a dynamic attr `''${nm} =`.
+    #
+    # ★ THE RESIDUAL, FAIL-OPEN, stated so no reader over-reads a green. The test is binder-SHAPED
+    # text, so (a) binder-shaped text inside a COMMENT or a STRING resolves — `# nm = …`,
+    # `[ "$nm" = x ]`, `core.nm=false`, `"''${nm?}"` — and (b) ANY binder of nm anywhere in the
+    # file resolves, not necessarily the one the row means. This is the "occurs somewhere" class,
+    # narrowed from every word to binder-shaped text; it is not closed.
+    #
+    # ★ THE ANCHORED COORDINATE DOES NOT USE THIS. `path.nix:N:ident` claims a LOCATION — ident is
+    # on line N — and a use site or a builtin is a legitimate anchor there. The two forms share the
+    # boundary and differ in the site predicate because they make different claims; the anchored
+    # form is not a stricter spelling of the name form. A USE SITE is cited in the anchored form.
+    function binds(l, nm,   o, k, before, rest, t) {
+      if (l ~ /^[ \t]*inherit[ \t(]/ && index(l, ";") > 0) {
+        t = l
+        sub(/^[ \t]*inherit[ \t]*(\([^)]*\))?/, "", t)
+        sub(/;.*/, "", t)
+        return wholeword(t, nm)
+      }
+      o = 1
+      while ((k = index(substr(l, o), nm)) > 0) {
+        k += o - 1
+        before = (k > 1) ? substr(l, k - 1, 1) : ""
+        rest = substr(l, k + length(nm))
+        if (before !~ IDCH && substr(rest, 1, 1) !~ IDCH) {
+          if (rest ~ /^"?(\.[A-Za-z0-9_'"-]+)*[ \t]*=([^=]|$)/) return 1
+          if (rest ~ /^[ \t]*\?/ && substr(l, 1, k - 1) ~ /(^[ \t]*|[{,][ \t]*)$/) return 1
+          if (rest ~ /^[ \t]*,[ \t]*$/ && substr(l, 1, k - 1) ~ /^[ \t]*$/) return 1
+        }
+        o = k + 1
+      }
+      return 0
+    }
+
+    # ★ A CITED NAME RESOLVES AS A WHOLE IDENTIFIER, NEVER AS A SUBSTRING — a cell, a binding
+    # anchor and an anchored coordinate alike, which is why this is one BOUNDARY and not three; a
+    # binding anchor adds its site predicate on top of it (`binds`, above). `index()` answers "does this
     # line contain these characters", a different question from "does this line name this thing":
     # `test-foo` is a substring of `test-foo-bar` and `strip` of `strips`, so a citation that is
     # truncated, renamed-by-suffix or commented out resolved against the name that REPLACED it —
@@ -490,7 +553,10 @@ let
       if (nBadF)  print "CITATION DRIFT -- files that do not exist: " join(badFiles, nBadF) > "/dev/stderr"
       if (nBadC)  print "CITATION DRIFT -- coordinates that do not resolve: " join(badCoords, nBadC) > "/dev/stderr"
       if (nBadAC) print "CITATION DRIFT -- anchored coordinates that do not resolve: " join(badACoords, nBadAC) > "/dev/stderr"
-      if (nBadA)  print "CITATION DRIFT -- binding anchors that do not resolve: " join(badAnchors, nBadA) > "/dev/stderr"
+      if (nBadA) {
+        print "CITATION DRIFT -- binding anchors that do not resolve: " join(badAnchors, nBadA) > "/dev/stderr"
+        print "  path.nix:name claims name is BOUND in path; a use site is cited as path.nix:N:name." > "/dev/stderr"
+      }
       print "Repair: fix the citation so it resolves against this repository's tree, or take the" > "/dev/stderr"
       print "span out of the region by giving it its own ATX section -- a visible structural act." > "/dev/stderr"
       print "This check reads whether the evidence a claim offers still EXISTS, never whether the" > "/dev/stderr"
