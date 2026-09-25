@@ -51,7 +51,8 @@ the harness plus the tools, with no library it did not ask for.
 
 A test module sets `flake.tests.<suite>.<name> = { expr; expected; };` and receives `name`,
 `genInputs`, `genPrelude` and whatever `specialArgs` adds. Suites run under
-`nix-unit --flake ./ci#tests`. A consumer that owes no `AGENTS.md` capability sheet declares it
+`nix develop ./ci --command ci`, the guarded form of `nix-unit --flake ./ci#tests` (see the declared
+read domain below). A consumer that owes no `AGENTS.md` capability sheet declares it
 through `extraModules` as `{ gen.ci.agentsMd.sheet = "not-owed"; }`; the `agents-md-citations`
 check then holds the tree to that declaration and refuses a sheet present beside it, while a
 consumer that declares nothing owes a sheet and is refused without one.
@@ -69,7 +70,13 @@ hooks and the `ci` devshell command — refuse before `nix-unit` is reached if a
 declared roots is git-unknown, or is a tracked symlink or submodule whose target the declaration
 does not also cover. It does **not** refuse on tracked-modified, tracked-deleted or staged files:
 those are fully visible to the evaluator with their worktree bytes, and refusing them would reject
-every commit touching a test cell. A hand-typed `nix-unit --flake ./ci#tests` is not guarded.
+every commit touching a test cell. A hand-typed `nix-unit --flake ./ci#tests` is not guarded, and
+neither is `nix flake check ./ci`: both read the git-filtered copy and report green over the cell
+they cannot see. So `nix develop ./ci --command ci` is the command to run the suites by.
+
+The refusal covers every git-unknown byte under a root, whatever its extension or name — a file the
+collector would skip, `_`-prefixed or not `.nix`, refuses too, because the root is also a read
+domain. The remedy is always the same: `git add` the file, or move it out from under the root.
 
 Those three are the harness's own, and they are not the whole set: a consumer's `extraModules` may
 wire further invocation points — a runner of its own over some other output, say — and those run
@@ -189,8 +196,9 @@ harness wires beside `ci` off the same guard. That holds whether they assert the
 (`expectedError`) or the answer that holds only while it does not happen.
 
 ```
-nix-unit --flake ./ci#tests          # the suites
-nix-unit --flake ./ci#testsError     # the cells whose expr can abort
-nix develop ./ci -c ci --tests-error # the same cells, under the nix on PATH
-nix flake check                      # in ci/ — treefmt, tree-root oracle, hooks
+nix develop ./ci -c ci               # the suites, behind the read-roots guard
+nix develop ./ci -c ci --tests-error # the cells whose expr can abort, under the nix on PATH, guarded
+nix flake check                      # in ci/ — treefmt, tree-root oracle, hooks; unguarded
+nix-unit --flake ./ci#tests          # the suites, unguarded
+nix-unit --flake ./ci#testsError     # the abort-capable cells, unguarded
 ```

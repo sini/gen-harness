@@ -79,13 +79,14 @@ functions of `pkgs`, no flake-parts module, no gen input.
 | Declare a test suite                                      | `flake.tests.<suite>.<cell> = { expr; expected; };` in a module under `testModules`                                                              |
 | Assert something that ABORTS                              | `flake.testsError`, reached through `extraModules` — never `flake.tests`                                                                         |
 | Declare paths the suite reads outside its collection root | `readRoots = [ ./fixtures ];` — added to `testModules`, not replacing it                                                                         |
-| Run every suite                                           | `nix-unit --flake ./ci#tests`                                                                                                                    |
-| Run the abort-capable cells                               | `nix-unit --flake ./ci#testsError`                                                                                                               |
+| Run every suite                                           | `nix develop ./ci --command ci` — guarded; bare `nix-unit --flake ./ci#tests` is unguarded, blind to an untracked cell                           |
+| Run the abort-capable cells                               | `nix develop ./ci --command ci --tests-error` — guarded; bare `nix-unit --flake ./ci#testsError` is unguarded                                    |
+| Clear a read-roots refusal                                | `git add` the git-unknown file, or move it out from under the root — any extension or name refuses, `_`-prefixed included                        |
 | Run them under the evaluator on `PATH` (Lix, Determinate) | the devshell's `ci --tests-error` — nix-unit links one upstream nix-expr whatever `nix` is installed                                             |
 | Run CI under upstream Nix, Determinate and Lix            | a job `uses: sini/gen-harness/.github/workflows/evaluators.yml@<the gen-harness rev in ci/flake.lock>`; `relock` keeps the sha equal to the lock |
 | Run a negative test with no pull request                  | the caller declares `workflow_dispatch`; push a scratch branch and `gh workflow run ci.yml --ref <branch>`                                       |
 | Run ONE cell                                              | the devshell's `ci <suite>.<cell>`, or `--flake ./ci#testSingletons.<suite>.<cell>`                                                              |
-| Run the gates                                             | `nix flake check ./ci` — never at the repository root                                                                                            |
+| Run the gates                                             | `nix flake check ./ci` — never at the repository root; unguarded, so run `ci` too                                                                |
 | Format                                                    | `nix fmt` from `ci/`; `nix fmt -- --ci` to check without writing                                                                                 |
 | Add an mdformat plugin for one repository                 | `gen.ci.mdformat.extraPlugins = p: [ p.whatever ];`                                                                                              |
 | Change which plugins the whole ecosystem gets             | the `names` list in `mdformat-plugins.nix`, and nowhere else                                                                                     |
@@ -163,10 +164,16 @@ Current output (verbatim):
 **Checks.** From the repository root; CI runs them in all three columns of `.github/workflows/evaluators.yml`, which this repository calls locally, and `./evaluator-pins.sh` gates the columns' pins on each evaluator's latest release:
 
 ```sh
+nix develop ./ci --command ci
+nix develop ./ci --command ci --tests-error
 nix flake check ./ci
 nix-unit --flake ./ci#tests
 nix-unit --flake ./ci#testsError
-nix develop ./ci --command ci --tests-error
 ./evaluator-pins.sh
 nix fmt -- --ci
 ```
+
+Locally, run the suites through `ci`: it refuses when anything under a declared read root is unknown
+to git, whatever its extension or name, and the remedy is `git add` or a move. The bare
+`nix flake check ./ci` and `nix-unit` lines are unguarded — they read the git-filtered copy, so an
+untracked cell is silently absent and they stay green. A CI checkout has no untracked files.
