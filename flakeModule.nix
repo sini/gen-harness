@@ -301,6 +301,7 @@ in
             if [ -n "$out" ]; then
               echo "REFUSE: git-unknown bytes under a declared read root — the evaluator cannot see them, so the suite would report a verdict it did not compute:"
               echo "$out"
+              echo "remedy: \`git add\` it, or move it outside the declared read roots."
               st=1
             fi
             if [ ''${#gitlinks[@]} -gt 0 ]; then
