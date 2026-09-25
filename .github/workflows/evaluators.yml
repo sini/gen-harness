@@ -32,8 +32,9 @@
 # name is skipped silently here.
 # ★ WHAT IT DOES NOT COVER: a check that runs `nix-instantiate`/`nix eval` INSIDE its build sandbox
 # evaluates with the ci-locked nixpkgs `pkgs.nix`, identically in all three columns — its drvPath is
-# the same under all three evaluators. gen-harness's own `relock-behaviour` is the remaining member.
-# A Lix or Determinate green is NOT a claim about the cells such a check evaluates.
+# the same under all three evaluators. A Lix or Determinate green is NOT a claim about the cells such
+# a check evaluates. No such check remains in gen-harness: its `relock` behaviour arms, the last
+# member, are its process plane (den-hoag-348bq).
 #
 # ★ THE `nix` COLUMN CAN RUN TWO UPSTREAM VERSIONS. Its evaluator is NIX_VERSION below; its extra
 # `nix-unit` step — kept because it alone checks `expectedError.type` — is nix-unit's own binary,
@@ -208,6 +209,29 @@ jobs:
           nix develop ./ci --command ci --tests-error | tee "$RUNNER_TEMP/tests-error.log"
           # The runner must have judged the plane with THIS column's evaluator.
           grep -Fxq "evaluator: $(nix --version | sed -n 1p)" "$RUNNER_TEMP/tests-error.log"
+
+      # ★ CI ONLY, AND ONE BINARY AT A TIME (den-hoag-348bq). A process-plane program may make its
+      # own network namespace (gen-harness's `relock` arms do), and these runners refuse
+      # unprivileged user namespaces (`kernel.apparmor_restrict_unprivileged_userns = 1`). The
+      # restriction is NOT lifted — a lift persists for every later step of the job — so each
+      # `unshare` in the program's own closure gets a per-binary AppArmor profile admitting it, and
+      # every other binary stays restricted. A step of its own, so the process-plane step's `run:`
+      # stays the command a local gate runs verbatim; a program that needs no namespace carries no
+      # `unshare` and nothing is loaded.
+      - name: admit the process plane's own unshare to user namespaces (CI only)
+        if: hashFiles('ci/tests-process.nix') != ''
+        run: |
+          nix develop ./ci --command ci --tests-process --userns-binaries > "$RUNNER_TEMP/userns-binaries"
+          while IFS= read -r b; do
+            case "$b" in
+              /nix/store/*/bin/unshare) ;;
+              *) echo "::error::not an unshare store path: '$b'"; exit 1 ;;
+            esac
+            h=$(basename "$(dirname "$(dirname "$b")")"); h=${h%%-*}
+            printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile tests-process-userns-%s %s flags=(unconfined) {\n  userns,\n}\n' "$h" "$b" > "$RUNNER_TEMP/userns-$h.profile"
+            sudo -n apparmor_parser -r "$RUNNER_TEMP/userns-$h.profile"
+            echo "admitted to user namespaces: $b"
+          done < "$RUNNER_TEMP/userns-binaries"
 
       - name: process plane (ci --tests-process)
         if: hashFiles('ci/tests-process.nix') != ''

@@ -1,8 +1,16 @@
-# Wires the `relock` behaviour oracle into THIS repository's checks and no consumer's.
+# THIS REPOSITORY'S PROCESS PLANE: the `relock` behaviour oracle, as `apps.<system>.tests-process`,
+# and no consumer's.
 #
 # It belongs here rather than in `flakeModule.nix` because its subject is the HARNESS, not the
 # member: `ci-self-input` runs in all 31 consumers because it reads each consumer's own lock, while
-# this one drives synthetic trees and would be the same build repeated 31 times.
+# this one drives synthetic trees and would be the same run repeated 31 times.
+#
+# ★ A PROGRAM, NOT A CHECK (den-hoag-348bq). Three of its arms compute their verdict through the
+# caller's `nix`, so they are evidence only for the evaluator that ran them. As a flake check the
+# evaluator was the ci-locked `pkgs.nix` — one drvPath, one verdict, in every `evaluators.yml`
+# column. As this program they run under the `nix` on PATH, through `ci --tests-process`, which is
+# the same command in each column and on the owner's host (bare `ci` runs no process plane).
+# `../relock-behaviour.nix` states how the program stays hermetic out of the sandbox.
 #
 # ★ IT REACHES THE COMMAND THROUGH THE PUBLISHED SURFACE — `lib.relock` applied to
 # `lib.checks.ciSelfInput`'s `passthru.scanner` — and never through a file path. That is the third
@@ -20,7 +28,8 @@
       fixtureName = "gen-harness-relock-fixture";
     in
     {
-      checks.relock-behaviour = import ../relock-behaviour.nix {
+      apps.tests-process.meta.description = "the relock behaviour arms, under the nix on PATH, in a network namespace of their own";
+      apps.tests-process.program = import ../relock-behaviour.nix {
         inherit pkgs fixtureName;
         name = "gen-harness";
         relock = inputs.gen-harness.lib.relock {

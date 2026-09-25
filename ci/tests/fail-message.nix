@@ -8,7 +8,7 @@
 # was gen-schema's own.
 #
 # ★ THEY REACH IT THROUGH THE PUBLISHED SURFACE — `inputs.gen-harness.lib.failMessage` — and never
-# through a file path, the same discipline `ci/relock-behaviour.nix` states for `lib.relock`. That
+# through a file path, the same discipline `ci/tests-process.nix` states for `lib.relock`. That
 # is also the only reason these cells exist at all: bound inside `flakeModule.nix` the function
 # was reachable only by a cell FAILING, so every value it was ever read at was one that had
 # already taken the gate down.

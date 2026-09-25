@@ -83,6 +83,20 @@ pkgs.writeShellApplication {
   # `nix` is the column's, from PATH — never a runtimeInput, for the reason the guard exists.
   text = ''
     root=$1
+    # `--userns-binaries`: build the program as below, then print, one per line on stdout and
+    # nothing else there, every `bin/unshare` in its runtime closure — the binaries a CI step with
+    # the privilege may admit to user namespaces (`evaluators.yml`, den-hoag-348bq). Everything
+    # else this mode says goes to stderr. EXIT: 0 read (an empty list is a closure with no
+    # unshare) · 1 REFUSED · 2 CONTROL FAILED, the closure was not read.
+    mode=''${2:-}
+    case "$mode" in
+    "") ;;
+    --userns-binaries) exec 3>&1 1>&2 ;;
+    *)
+      echo "CONTROL FAILED: unknown process-plane mode '$mode'" >&2
+      exit 2
+      ;;
+    esac
     # ★ KEYED ON THE FILE NAME, as `evaluators.yml`'s step is: a process plane declared under any
     # other name is skipped silently by both (ci-plane-coverage's to learn; den-hoag-jutgv G2).
     if [ ! -e "$root/ci/tests-process.nix" ]; then
@@ -117,6 +131,22 @@ pkgs.writeShellApplication {
     mapfile -t tgt <<<"$targets"
     nix build --no-link "''${tgt[@]}" || { echo "CONTROL FAILED: the process-plane program did not build"; exit 2; }
     prog=$(nix eval --raw "$ref.tests-process.program")
+
+    if [ "$mode" = --userns-binaries ]; then
+      rc=0
+      clos=$(nix-store -qR "$prog" 2>"$err") || rc=$?
+      if [ "$rc" -ne 0 ] || [ -z "$clos" ]; then
+        printf 'CONTROL FAILED: the closure of %s was not read (nix-store -qR rc=%s): %s\n' "$prog" "$rc" "$(cat "$err")"
+        exit 2
+      fi
+      while IFS= read -r p; do
+        if [ -x "$p/bin/unshare" ]; then
+          # The path the kernel attaches a profile to is the RESOLVED one.
+          readlink -f "$p/bin/unshare" >&3
+        fi
+      done <<<"$clos"
+      exit 0
+    fi
 
     "${guard}/bin/${name}-ci-evaluator-closure" "$prog" || exit $?
     exec "$prog"

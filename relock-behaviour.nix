@@ -24,8 +24,39 @@
 # HAPPENED TO BE CHOSEN. Every refusal `relock` makes is decided BEFORE its first `nix flake
 # update`, so the whole refusing half of the command can be driven with the network off — and
 # saying so here, with a live guard below, is what stops a later contributor quietly adding an
-# acting arm and making this suite flaky at a distance. The guard at the head of the builder
-# attempts an outbound TCP connection and FAILS THE BUILD IF IT SUCCEEDS.
+# acting arm and making this suite flaky at a distance. The guard at the head of the arms
+# attempts an outbound TCP connection and FAILS THE RUN IF IT SUCCEEDS.
+#
+# ★★ A PROGRAM, NOT A CHECK, AND IT MAKES ITS OWN NETWORK NAMESPACE (den-hoag-348bq). Three arms
+# compute their verdict through the caller's `nix` (`nix eval --json --file` twice, and arm
+# `a-declared-input-is-not-refused-as-undeclared`'s real `nix flake update`), and a verdict is
+# evidence only for the evaluator that computed it. As a sandboxed check its `nix` was a
+# derivation input — one drvPath, one verdict substituted into all three `evaluators.yml` columns.
+# So this is `apps.<system>.tests-process`, run by `ci --tests-process` with the `nix` on PATH, in
+# every column and locally by the same command. Out of the sandbox the program re-creates the
+# sandbox's two properties itself, and asserts both before any arm runs:
+#   · NO NETWORK ROUTE. It re-executes the arms under `unshare -cn` — a user namespace mapping the
+#     CURRENT uid (never `-r`: under a uid-0 mapping nix tries to chown its relocated store and the
+#     two `nix eval --file` arms fail) plus an empty network namespace. The TCP guard then proves
+#     no route exists FROM THAT NAMESPACE. It does not prove relock makes no network attempt: arm 6
+#     reaches a real `nix flake update` by design, and the arm asserts that act FAILED.
+#   · NO FETCHING AROUND IT. A network namespace does not close the host nix daemon's socket, and
+#     the daemon has the network (measured, den-hoag-348bq gate arm C). What keeps every fetch out
+#     is the RELOCATED LOCAL STORE under the run directory, which the program asserts — the
+#     evaluator's own `builtins.storeDir` must be the relocated one and the store's database must
+#     have been created there — refusing loudly, rc 2, otherwise.
+# A namespace that cannot be made (a kernel restricting unprivileged user namespaces, as
+# GitHub's Ubuntu runners do) is rc 2 CONTROL FAILED, never a skip and never a run on the host
+# network. `evaluators.yml` admits exactly this program's `unshare` to user namespaces with a
+# per-binary AppArmor profile, in a step of its own; the owner's host needs nothing.
+#
+# ★ THE ARMS' NIX CONFIGURATION IS STATED HERE, NOT INHERITED. Out of the sandbox the host's
+# `nix.conf`, user config and environment would reach every arm (measured: host substituters, a
+# user `show-trace = true`, Lix reading the host's experimental features). The program points
+# `NIX_CONF_DIR` and `NIX_USER_CONF_FILES` at empty files of its own, unsets `NIX_REMOTE` and
+# `NIX_PATH`, gives the arms a fresh `HOME`, and hands the evaluator `NIX_CONFIG` alone: the
+# experimental command, `evaluators.yml`'s EVAL_CONF (`show-trace = false`, `nix-path =`) and no
+# substituters. The evaluator BINARY is the column's; its configuration is this file's.
 #
 # ★ WHAT IT DOES NOT COVER, stated rather than implied. Three arms need `nix flake update` and
 # therefore a network and a daemon, and none of them is in here:
@@ -340,13 +371,20 @@ let
       locks = "unchanged";
     }
     {
-      # ★ ASSERTED ON THE MESSAGE, NOT THE EXIT, and the header says why: a DECLARED input proceeds
-      # to `nix flake update`, which is the act this cell does not run. What is checkable here is
-      # that the refusal above discriminates by NAME rather than refusing everything.
+      # ★ ASSERTED ON THE MESSAGE, and the header says why: a DECLARED input proceeds to `nix flake
+      # update`, which is the act this cell does not run. What is checkable here is that the refusal
+      # above discriminates by NAME rather than refusing everything.
+      #
+      # ★ AND THE ACT MUST FAIL: rc 1 is `nix flake update`'s own failure, which `relock` passes on.
+      # This arm is the one that reaches the evaluator's fetch path, so an rc 0 here means the act
+      # SUCCEEDED — a fetch got out, around the namespace and the relocated store — and must red.
+      # Measured rc 1 under upstream 2.35.2, Determinate 3.22.5 and Lix 2.95.2 (den-hoag-348bq):
+      # upstream and Lix refuse at the `flakes` feature gate; Determinate, whose flakes are on,
+      # refuses the synthetic lock (`attribute 'original' missing in lock file`) before any fetch.
       label = "a-declared-input-is-not-refused-as-undeclared";
       fixture = "two-act";
       args = [ alpha ];
-      rc = null;
+      rc = 1;
       wants = [ ];
       forbids = [ "is not a declared input" ];
       locks = "any";
@@ -716,23 +754,18 @@ let
 
   repair = "a `relock` behaviour arm stopped holding. Read WHICH arm and WHICH WAY. An arm that expected a REFUSAL and got something else means the command's refusing half has regressed — repair the command, never the arm; every one of these encodes a defect that reached a human. An arm that expected the CI-ONLY ACT and now refuses means the zero-root-input discrimination has regressed, which is `den-hoag-9jr` all over again. If an arm fails because it needed the network, it was added to the wrong cell: this one is hermetic by assertion and the acting half is exercised by running the command.";
 in
-pkgs.runCommand "${name}-relock-behaviour"
-  {
-    nativeBuildInputs = [
-      pkgs.jq
-      pkgs.diffutils
-      # `relock` takes `nix` from the CALLER and not from its own `runtimeInputs` — it must talk to
-      # the caller's daemon and write the caller's locks — so the caller has to supply one. Here
-      # that caller is this builder. Supplying it is not a loosening: the only `nix` invocation any
-      # arm reaches is `nix eval --file` over a fixture's own `flake.nix`.
-      pkgs.nix
-    ];
-    passthru = { inherit arms fixtures; };
-  }
-  ''
+let
+  unshare = lib.getExe' pkgs.util-linux "unshare";
+  nArms = toString (builtins.length arms);
+
+  # THE ARMS, run inside the namespace the program below makes. The body the sandboxed check ran,
+  # plus the two assertions the sandbox made structurally: the arms' configuration, and the store.
+  body = pkgs.writeShellScript "${name}-relock-behaviour-arms" ''
+    set -euo pipefail
     export TMP=$PWD
     fail_count=0
     armFailed=0
+    ran=0
 
     fail() {
       echo "ARM FAILED: $1" >&2
@@ -743,27 +776,55 @@ pkgs.runCommand "${name}-relock-behaviour"
       armFailed=1
     }
 
-    # ★ HERMETICITY, ASSERTED RATHER THAN ASSUMED. A build sandbox has no network; this says so out
+    # ★ HERMETICITY, ASSERTED RATHER THAN ASSUMED. This namespace has no network; this says so out
     # loud so that a future arm which quietly needs one cannot pass by accident somewhere the
-    # sandbox is relaxed. It fails the build on SUCCESS, which is the direction that matters.
+    # namespace was not made. It fails the run on SUCCESS, which is the direction that matters.
     if (exec 3<>/dev/tcp/1.1.1.1/80) 2>/dev/null; then
       echo "CONTROL FAILED: this cell reached the network. Its arms are only meaningful offline;" >&2
       echo "the refusing half of relock decides before its first fetch, and that is the whole claim." >&2
       exit 2
     fi
-    echo "hermetic:   no outbound TCP from this builder"
+    echo "hermetic:   no outbound TCP from this namespace"
 
-    # `relock` reads a flake's declared inputs with `nix eval --file` on the one path where there is
-    # no lock to read them from. Inside a sandbox that needs the experimental command AND a state
+    # The arms' nix configuration, STATED (header): no host nix.conf, no user config, no daemon, no
+    # substituters. `relock` reads a flake's declared inputs with `nix eval --file` on the one path
+    # where there is no lock to read them from, which needs the experimental command AND a state
     # directory it may write — neither changes what is evaluated, which is a plain file and a pure
     # function of it.
-    export NIX_CONFIG="experimental-features = nix-command"
-    export NIX_STORE_DIR=$PWD/nixstore NIX_STATE_DIR=$PWD/nixstate NIX_LOG_DIR=$PWD/nixlog
+    mkdir -p "$TMP/home" "$TMP/nixconf"
+    : > "$TMP/nix-user.conf"
+    unset NIX_REMOTE NIX_PATH XDG_CONFIG_HOME XDG_CONFIG_DIRS XDG_CACHE_HOME XDG_STATE_HOME XDG_DATA_HOME
+    export HOME=$TMP/home GIT_CONFIG_NOSYSTEM=1
+    export NIX_CONF_DIR=$TMP/nixconf NIX_USER_CONF_FILES=$TMP/nix-user.conf
+    export NIX_CONFIG="experimental-features = nix-command
+    show-trace = false
+    nix-path =
+    substituters ="
+    export NIX_STORE_DIR=$TMP/nixstore NIX_STATE_DIR=$TMP/nixstate NIX_LOG_DIR=$TMP/nixlog
+
+    # ★ THE STORE IS THE RELOCATED LOCAL ONE, ASSERTED BEFORE ANY ARM. The network namespace does not
+    # close the host daemon's socket, and the daemon has the network: this is what keeps a fetch
+    # out. Two facts, both the evaluator's own: its store directory is the relocated one, and that
+    # store's database was created under the relocated state directory (a daemon store creates none).
+    rc=0
+    storeDir=$(nix eval --raw --expr builtins.storeDir 2> "$TMP/store.err") || rc=$?
+    if [ "$rc" -ne 0 ]; then
+      echo "CONTROL FAILED: the evaluator could not report its store (rc=$rc): $(cat "$TMP/store.err")" >&2
+      exit 2
+    fi
+    if [ "$storeDir" != "$TMP/nixstore" ] || [ ! -e "$TMP/nixstate/db/db.sqlite" ]; then
+      echo "CONTROL FAILED: the arms' store is not the relocated local one (builtins.storeDir = '$storeDir'," >&2
+      echo "want '$TMP/nixstore'; database under $TMP/nixstate: $(ls "$TMP/nixstate/db" 2>&1 | tr '\n' ' '))." >&2
+      echo "A store outside this run's directory is one a daemon with the network can fetch into." >&2
+      exit 2
+    fi
+    echo "store:      the relocated local store, $storeDir"
 
     ${lib.concatMapStringsSep "\n" (
       a:
       ''
         armFailed=0
+        ran=$((ran + 1))
       ''
       + mkArm a
     ) arms}
@@ -773,6 +834,51 @@ pkgs.runCommand "${name}-relock-behaviour"
       echo ${lib.escapeShellArg repair} >&2
       exit 1
     fi
-    echo "all ${toString (builtins.length arms)} arms held"
-    touch $out
-  ''
+    # ★ A SHORT RUN IS A RED, NOT A SMALLER GREEN: `0/0` must never print `held`.
+    if [ "$ran" != ${nArms} ]; then
+      echo "CONTROL FAILED: $ran of ${nArms} arms ran" >&2
+      exit 2
+    fi
+    echo "all ${nArms} arms held"
+  '';
+in
+(pkgs.writeShellScriptBin "tests-process" ''
+  set -euo pipefail
+  # The tools the arms call, declared rather than ambient — and never an evaluator: the `nix` is
+  # the column's, from PATH (`process-plane.nix`'s closure guard refuses one in here).
+  export PATH=${
+    lib.makeBinPath [
+      pkgs.jq
+      pkgs.diffutils
+      pkgs.coreutils
+      pkgs.findutils
+      pkgs.gnugrep
+      pkgs.gnused
+    ]
+  }:$PATH
+  # The evaluator the arms run under, from this process and the binary they call.
+  echo "evaluator: $(nix-instantiate --version | sed -n 1p)"
+  run=$(mktemp -d)
+  # A relocated store's paths are read-only, so the cleanup makes them writable first.
+  trap 'chmod -R u+w "$run"; rm -rf "$run"' EXIT
+  cd "$run"
+
+  # ★ THE NAMESPACE IS PROVEN BEFORE IT IS USED, and there is no fallback: a run on the host
+  # network would red on the TCP guard at best and, where the guard is ever weakened, pass on
+  # arms that fetched.
+  rc=0
+  err=$(${unshare} -cn true 2>&1) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "CONTROL FAILED: this program could not make its own network namespace (unshare -cn rc=$rc): $err" >&2
+    echo "Its arms run only with no network route. The kernel refuses unprivileged user namespaces here:" >&2
+    echo "on Ubuntu that is kernel.apparmor_restrict_unprivileged_userns = 1, which gen-harness's" >&2
+    echo "evaluators.yml answers by admitting ${unshare} alone with an AppArmor profile." >&2
+    exit 2
+  fi
+  rc=0
+  ${unshare} -cn ${body} || rc=$?
+  exit "$rc"
+'').overrideAttrs
+  (_: {
+    passthru = { inherit arms fixtures; };
+  })

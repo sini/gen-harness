@@ -613,8 +613,10 @@ in
                 # `ci --tests-process`: the process plane (`apps.<system>.tests-process`) run under
                 # the `nix` on PATH, after the same guard, for the same reason (`process-plane.nix`
                 # states the consumer's contract and refuses a program carrying an evaluator).
+                # `ci --tests-process --userns-binaries` lists the program's own `unshare` binaries
+                # for the CI step that admits them to user namespaces, and runs no cell.
                 if [ "''${1:-}" = "--tests-process" ]; then
-                  exec "${processPlaneCmd}/bin/${name}-ci-tests-process" "$FLAKE_ROOT"
+                  exec "${processPlaneCmd}/bin/${name}-ci-tests-process" "$FLAKE_ROOT" "''${2:-}"
                 fi
 
                 # A `suite.test` arg must target the `testSingletons` view: nix-unit treats the attrpath
