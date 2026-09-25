@@ -108,18 +108,19 @@ let
   #
   # ★ WHAT THIS RULE ADMITS — lexical, like `runsLine`, and for the same reason: no YAML is parsed, so
   # the rule sees the `uses:` LINE, never the job's reachability. Four admitted shapes, none tabled in
-  # an external spec: a caller job disabled with `if: false`; a caller reachable only from
-  # `workflow_dispatch` and never from `push`; a `uses:` line that happens to fall inside another
-  # step's `run: |` block scalar, where it never executes as a call; and a step-level `- uses:` of the
-  # workflow path, which is not an action, so GitHub refuses the job at run time — a red this check
-  # never has to name, because GitHub names it first (derived, not run). The LOCAL-form admission
-  # (`definesEvaluators` below) is the same shape one level up, ruled at phase 1 (§2.8): any tree that
-  # carries its OWN file named `.github/workflows/evaluators.yml` reads `called = true`, because the
-  # proxy is "defines the file", never "the file's origin is gen-harness". Measured at gen-harness
-  # `4a6d4c0` by the `den-hoag-lbtnv` phase-3 landing gate: 0 live instances of a job-level `if:`
-  # across the 26 caller files (control: 7 in gen-harness's own `evaluators.yml`, 1 in the hub's
-  # sibling `docs-pages.yml`) — an INCIDENCE figure, not a property of this rule, and one a later
-  # caller can move.
+  # an external spec and each a named fixture row in `den-hoag-lbtnv-p3-landing-gate-probe.zsh`:
+  # `disabled-if`, a caller job disabled with `if: false`; `dispatch-only`, a caller reachable only
+  # from `workflow_dispatch` and never from `push`; `block-scalar`, a `uses:` line that happens to
+  # fall inside another step's `run: |` block scalar, where it never executes as a call; and
+  # `step-uses`, a step-level `- uses:` of the workflow path, which is not an action, so GitHub
+  # refuses the job at run time — a red this check never has to name, because GitHub names it first
+  # (derived, not run). The LOCAL-form admission (`definesEvaluators` below) is the same shape one
+  # level up, ruled at phase 1 (§2.8): any tree that carries its OWN file named
+  # `.github/workflows/evaluators.yml` reads `called = true`, because the proxy is "defines the
+  # file", never "the file's origin is gen-harness". Measured at gen-harness `4a6d4c0` by the
+  # `den-hoag-lbtnv` phase-3 landing gate: 0 live instances of a job-level `if:` across the 26 caller
+  # files (control: 7 in gen-harness's own `evaluators.yml`, 1 in the hub's sibling `docs-pages.yml`)
+  # — an INCIDENCE figure, not a property of this rule, and one a later caller can move.
   callOf =
     l:
     let
