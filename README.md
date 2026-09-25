@@ -107,8 +107,15 @@ The gen libraries must work under upstream Nix, Determinate Nix and Lix (owner r
 2026-09-24), and the CI that holds them to it lives here, as one reusable workflow:
 
 ```yaml
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
 jobs:
-  ci:
+  evaluators:
     uses: sini/gen-harness/.github/workflows/evaluators.yml@<the gen-harness rev in ci/flake.lock>
 ```
 
@@ -126,6 +133,11 @@ The sha is the harness the caller's `ci/flake.lock` holds, never `@main`: the wo
 devshell commands from the locked harness, and a mismatch would put two versions of the harness in
 one run. `relock` rewrites the sha on every run it does not refuse, and `checks.ci-plane-coverage`
 refuses a skewed one. This repository calls the workflow locally.
+
+`workflow_dispatch` is on the caller so that a negative test needs no pull request: push the planted
+failure to a scratch branch, run `gh workflow run ci.yml --ref <branch>`, read that run, and delete
+the branch. GitHub accepts the dispatch only if the default branch's `ci.yml` declares the trigger,
+so it goes in every caller on `main`. The reusable workflow stays `workflow_call` only.
 
 The pins are each evaluator's latest release. `./evaluator-pins.sh` compares them with the upstream,
 Determinate and Lix release feeds, and a pin behind is red in this repository's CI. It is a workflow

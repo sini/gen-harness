@@ -4,6 +4,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # A negative test runs on a scratch branch with no pull request: `gh workflow run ci.yml --ref <branch>`.
+  workflow_dispatch:
 
 jobs:
   # The three-evaluator matrix, called LOCALLY: a remote `@sha` self-call would run a published copy

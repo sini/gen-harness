@@ -83,6 +83,7 @@ functions of `pkgs`, no flake-parts module, no gen input.
 | Run the abort-capable cells                               | `nix-unit --flake ./ci#testsError`                                                                                                               |
 | Run them under the evaluator on `PATH` (Lix, Determinate) | the devshell's `ci --tests-error` — nix-unit links one upstream nix-expr whatever `nix` is installed                                             |
 | Run CI under upstream Nix, Determinate and Lix            | a job `uses: sini/gen-harness/.github/workflows/evaluators.yml@<the gen-harness rev in ci/flake.lock>`; `relock` keeps the sha equal to the lock |
+| Run a negative test with no pull request                  | the caller declares `workflow_dispatch`; push a scratch branch and `gh workflow run ci.yml --ref <branch>`                                       |
 | Run ONE cell                                              | the devshell's `ci <suite>.<cell>`, or `--flake ./ci#testSingletons.<suite>.<cell>`                                                              |
 | Run the gates                                             | `nix flake check ./ci` — never at the repository root                                                                                            |
 | Format                                                    | `nix fmt` from `ci/`; `nix fmt -- --ci` to check without writing                                                                                 |

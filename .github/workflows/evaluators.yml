@@ -4,6 +4,10 @@
 # the CI for that lives here, in gen-harness; each evaluator is pinned to an exact version held at
 # that evaluator's LATEST release ("latest pins"). A caller writes
 #
+#   on:
+#     push: { branches: [main] }
+#     pull_request: { branches: [main] }
+#     workflow_dispatch:
 #   jobs:
 #     ci:
 #       uses: sini/gen-harness/.github/workflows/evaluators.yml@<the gen-harness rev in ci/flake.lock>
@@ -11,6 +15,13 @@
 # and `relock` keeps that sha equal to the lock; `ci-plane-coverage`'s
 # `caller-ref-is-locked-harness` refuses a skew. gen-harness calls this file LOCALLY
 # (`uses: ./.github/workflows/evaluators.yml`), never at a published sha of itself.
+#
+# ★ `workflow_dispatch` BELONGS ON THE CALLER, not here. A dispatch starts a workflow file of the
+# repository it is sent to, so a member's negative test is its OWN `ci.yml` dispatched on a scratch
+# branch — `gh workflow run ci.yml --ref <branch>` — with no pull request; GitHub admits the dispatch
+# only when the default branch's copy of that file declares the trigger. This file stays
+# `workflow_call` only: it is never started except through a caller, and gen-harness's own `ci.yml`
+# is that caller for this repository.
 #
 # ★ WHAT A GREEN COLUMN COVERS. Each column's own `nix` evaluates, in-process: every `nix flake
 # check` line (so `checks.default`, the batch asserter over `flake.tests`, and every check's
