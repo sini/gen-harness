@@ -105,6 +105,21 @@ let
   # and runs nothing there. Lexical, like `runsLine`: the value is the whole `uses:` scalar, quotes
   # and a trailing comment stripped. The LOCAL form counts only in a tree that itself carries
   # `evaluators.yml` — gen-harness — because anywhere else it names a file that is not there.
+  #
+  # ★ WHAT THIS RULE ADMITS — lexical, like `runsLine`, and for the same reason: no YAML is parsed, so
+  # the rule sees the `uses:` LINE, never the job's reachability. Four admitted shapes, none tabled in
+  # an external spec: a caller job disabled with `if: false`; a caller reachable only from
+  # `workflow_dispatch` and never from `push`; a `uses:` line that happens to fall inside another
+  # step's `run: |` block scalar, where it never executes as a call; and a step-level `- uses:` of the
+  # workflow path, which is not an action, so GitHub refuses the job at run time — a red this check
+  # never has to name, because GitHub names it first (derived, not run). The LOCAL-form admission
+  # (`definesEvaluators` below) is the same shape one level up, ruled at phase 1 (§2.8): any tree that
+  # carries its OWN file named `.github/workflows/evaluators.yml` reads `called = true`, because the
+  # proxy is "defines the file", never "the file's origin is gen-harness". Measured at gen-harness
+  # `4a6d4c0` by the `den-hoag-lbtnv` phase-3 landing gate: 0 live instances of a job-level `if:`
+  # across the 26 caller files (control: 7 in gen-harness's own `evaluators.yml`, 1 in the hub's
+  # sibling `docs-pages.yml`) — an INCIDENCE figure, not a property of this rule, and one a later
+  # caller can move.
   callOf =
     l:
     let
@@ -398,6 +413,10 @@ let
     # The three-evaluator ruling (den-hoag-lbtnv): a tree with a workflow directory runs its CI
     # through `evaluators.yml`. `called` is the same `callsOf` reading the skew cell keys on, so a
     # `run:`-only workflow, even one that runs the error plane, is not a call.
+    # ★ THE KEY'S NAME SAYS "EVERY"; THE PREDICATE IS LOOSER. One caller job anywhere under
+    # `.github/workflows` satisfies the whole directory — §2.5's hub keeps a non-caller sibling,
+    # `docs-pages.yml`, beside its caller `ci.yml`, and both are green. The name is kept: this is a
+    # shipped gate key, and renaming it is a separate change from what it means.
     every-workflow-calls-evaluators = !refusesNonCaller liveFacts;
     # The seed's step is its fifth line; the witness coordinate is armed with the state.
     arming-runs = arm.runs.state == "runs" && arm.runs.witness.runs.line == 5;
@@ -432,7 +451,7 @@ let
     no-undeclared-runner = "a workflow step invokes testsError and ci/tests-error.nix does not exist: the plane was renamed or removed while its step stayed. Restore the file or remove the step; a plane living on under another name is undeclared.";
     plane-non-vacuous = "ci/tests-error.nix is declared and the evaluated testsError holds 0 test-prefixed leaves: nix-unit would report 0/0 and exit 0, the false pass. Give the plane a cell or retire the file.";
     reader-live = "the reader cannot see ci/flake.nix under its root: the check is bound to the wrong tree. `root` must be inputs.self.sourceInfo.outPath.";
-    every-workflow-calls-evaluators = "this repository has .github/workflows and no job calls gen-harness's evaluators.yml, so its CI does not run under upstream Nix, Determinate and Lix. Replace the `run:` job with `jobs.ci.uses: sini/gen-harness/.github/workflows/evaluators.yml@<the gen-harness rev in ci/flake.lock>` (`relock` writes the sha), or remove the workflow directory.";
+    every-workflow-calls-evaluators = "this repository has .github/workflows and no job calls gen-harness's evaluators.yml, so its CI does not run under upstream Nix, Determinate and Lix. Replace the `run:` job with `jobs.ci.uses: sini/gen-harness/.github/workflows/evaluators.yml@<the gen-harness rev in ci/flake.lock>` (write any 40-hex sha, then `relock` rewrites it), or remove the workflow directory.";
     caller-ref-is-locked-harness = "a `uses: sini/gen-harness/.github/workflows/evaluators.yml@<sha>` line names a revision other than the gen-harness this ci is locked to (${toString harnessRev}), or this tree defines evaluators.yml itself and calls a published copy. Run `relock`, which rewrites the sha to the locked rev; gen-harness calls its own workflow locally (`uses: ./.github/workflows/evaluators.yml`).";
   };
   armingRepair = "an arming cell stopped firing: the classifier or the leaf counter no longer discriminates the state its seed encodes. A guard that can no longer refuse is not a passing guard; repair the predicate, never the seed.";
