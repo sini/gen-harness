@@ -69,6 +69,11 @@
     # must run ONE predicate and two constructions of it drift.
     lib.checks.ciSelfInput = import ./ci-self-input.nix;
 
+    # A source root, and the consumer's declared obligation (`entry`, `retired`). Published for the
+    # same non-mkCi consumer as its neighbours. The tombstone message cells are the flake module's
+    # (`retiredCells` in the same file); a direct consumer declaring `retired` owes them itself.
+    lib.checks.rootSurface = (import ./root-surface.nix).check;
+
     # ★ THE TWO-ACT LOCK BUMP, PUBLISHED AS A BUILDER RATHER THAN AS A DEVSHELL ENTRY. Every mkCi
     # consumer gets `relock` through `flakeModule.nix`, which is the ordinary route and is
     # unchanged. The hub is the case this exists for: it is legitimately NOT an mkCi consumer — it

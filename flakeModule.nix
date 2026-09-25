@@ -36,6 +36,10 @@ let
   mdformatExtra = config.gen.ci.mdformat.extraPlugins;
   # Bound HERE for the same reason as `mdformatExtra` above: `perSystem`'s own `config` shadows.
   sheetDeclared = config.gen.ci.agentsMd.sheet;
+  # Bound HERE for the same reason again, and read by both the check and the generated cells.
+  rootSurface = import ./root-surface.nix;
+  rsEntry = config.gen.ci.rootSurface.entry;
+  rsRetired = config.gen.ci.rootSurface.retired;
 
   # KNOWN LIMIT, and it belongs to this gate rather than to the suites it reads: `expr` is forced
   # for every cell unconditionally, so a cell whose `expr` ABORTS crashes the check instead of
@@ -127,8 +131,49 @@ in
     '';
   };
 
+  # The consumer's DECLARED ROOT-SURFACE OBLIGATION, the same declared-obligation shape as the
+  # sheet above: the default is the invariant, so a consumer that says nothing owes the check.
+  options.gen.ci.rootSurface.entry = lib.mkOption {
+    type = lib.types.enum [
+      "owed"
+      "not-owed"
+    ];
+    default = "owed";
+    description = ''
+      Whether this repository's root `default.nix` is a published library surface that
+      `checks.root-surface` holds. `owed`: the root is applied at its declared point
+      (`import <root> { }`, or the root itself when it is a set) and every published name — a path
+      through plain namespaces, with `_type`-tagged values, derivations and functions as leaves —
+      must evaluate to WHNF, except the declared `retired` tombstones. The green says that of the
+      library at its OWN declared point only (for a roster member, its root-lock pins), never at
+      any other. `not-owed`: no root `default.nix` may exist, and that declaration is the check's
+      subject. Declare it in the same commit as the harness bump that brings this option.
+    '';
+  };
+
+  options.gen.ci.rootSurface.retired = lib.mkOption {
+    type = lib.types.attrsOf lib.types.str;
+    default = { };
+    description = ''
+      Top-level tombstones: `<name> = <the EXACT message its throw carries>`. Each name is excluded
+      from the walk, refused if absent or no longer throwing, and pinned to its message by one
+      generated `flake.testsError.root-surface-retired.test-retired-<name>` cell forced at the root
+      seam. Refused where `ci/tests-error.nix` is absent, since no CI step would run that cell.
+    '';
+  };
+
   config = {
     systems = lib.systems.flakeExposed;
+
+    # One error-plane cell per declared tombstone (`root-surface.nix`, `retiredCells`). Only a
+    # declarer gets the suite, and the check refuses a declarer with no plane file to run it.
+    flake.testsError = lib.mkIf (rsRetired != { }) {
+      root-surface-retired = rootSurface.retiredCells {
+        inherit lib;
+        root = inputs.self.sourceInfo.outPath;
+        retired = rsRetired;
+      };
+    };
 
     # testSingletons.<suite>.<test> = { <test> = leaf; } — re-nests each leaf under a group keyed by its
     # OWN (test-prefixed) name, so `--flake .#testSingletons.<suite>.<test>` makes that singleton the
@@ -465,6 +510,16 @@ in
         # declarer that could opt out would be the fail-open shape the check exists to close. The
         # evaluated `testsError` is the sibling output, handed in for the one cell whose unit is
         # collected cells rather than text.
+        # The published surface at the library's own declared point: `root-surface.nix` states what
+        # the green says and what it does not. Same root binding as the two checks above, and the
+        # same declared obligation: a repository with no root entry says `not-owed`.
+        checks.root-surface = rootSurface.check {
+          inherit pkgs name;
+          root = inputs.self.sourceInfo.outPath;
+          entry = rsEntry;
+          retired = rsRetired;
+        };
+
         checks.ci-plane-coverage = import ./ci-plane-coverage.nix {
           inherit pkgs name testsError;
           root = inputs.self.sourceInfo.outPath;

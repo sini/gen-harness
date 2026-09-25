@@ -57,6 +57,17 @@ through `extraModules` as `{ gen.ci.agentsMd.sheet = "not-owed"; }`; the `agents
 check then holds the tree to that declaration and refuses a sheet present beside it, while a
 consumer that declares nothing owes a sheet and is refused without one.
 
+`checks.root-surface` holds a repository's root `default.nix` the same way. By default it is owed:
+the root is applied at its own declared point (`import <root> { }`, or the root itself when it is a
+set) and every published name, a path through plain namespaces with `_type`-tagged values,
+derivations and functions as leaves, must evaluate. A repository with no root entry declares
+`{ gen.ci.rootSurface.entry = "not-owed"; }`. A top-level tombstone is declared with its exact
+message, `gen.ci.rootSurface.retired.<name> = "<message>";`, which also generates the error-plane
+cell `testsError.root-surface-retired.test-retired-<name>` pinning that message, and so is refused
+where `ci/tests-error.nix` is absent. The green is a statement about the library at its own
+declared point only (`root-surface.nix` states the scope), and the walk has no depth bound: a
+cyclic namespace reds with `max-call-depth exceeded`.
+
 ### The declared read domain
 
 A suite's evaluator reads a **git-filtered** copy of the repository, so a file git does not know

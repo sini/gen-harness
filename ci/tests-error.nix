@@ -28,12 +28,94 @@
 #   nix-unit --flake ./ci#tests        # the suites
 #   nix-unit --flake ./ci#testsError   # these cells
 {
+  lib,
+  inputs,
   genPrelude,
   upstreamPrelude,
   ...
 }:
+let
+  # `checks.root-surface`'s REFUSAL arms, each pinned to its message under the column's own
+  # evaluator. The green arms are `tests/root-surface.nix`. `pkgs` is a stub: every arm here refuses
+  # at evaluation, before anything would be built.
+  rsCheck =
+    args:
+    inputs.gen-harness.lib.checks.rootSurface (
+      {
+        pkgs.runCommand =
+          n: _: _:
+          n;
+        name = "fx";
+      }
+      // args
+    );
+  fx = ./tests/_fixtures/root-surface;
+  refuses = args: msg: {
+    expr = rsCheck args;
+    expectedError = {
+      type = "ThrownError";
+      msg = lib.escapeRegex msg;
+    };
+  };
+  gone = "root-surface-fixture: `gone` is retired (use `live`).";
+in
 {
   config = {
+    flake.testsError.root-surface = {
+      test-a-top-level-published-name-that-throws-reds = refuses {
+        root = fx + "/top-throw";
+      } "root-surface-fixture: top-level";
+      test-a-name-two-namespaces-down-that-throws-reds = refuses {
+        root = fx + "/nested-throw";
+      } "root-surface-fixture: nested";
+      test-a-functor-set-is-a-namespace = refuses {
+        root = fx + "/functor-throw";
+      } "root-surface-fixture: functor member";
+      test-an-undeclared-tombstone-reds-with-its-own-message = refuses {
+        root = fx + "/tomb";
+      } gone;
+      test-a-retired-name-that-is-absent-is-refused = refuses {
+        root = fx + "/tomb";
+        retired.noSuchMember = "x";
+      } "root-surface: declared retired but absent or no longer throwing: noSuchMember";
+      test-a-retired-name-that-no-longer-throws-is-refused = refuses {
+        root = fx + "/tomb";
+        retired = {
+          inherit gone;
+          live = "x";
+        };
+      } "root-surface: declared retired but absent or no longer throwing: live";
+      # den-hoag-ydm94 G3: the tombstone's message cell would be generated and never run.
+      test-a-tombstone-without-an-error-plane-is-refused = refuses {
+        root = fx + "/top-throw";
+        retired.broken = "root-surface-fixture: top-level";
+      } "root-surface: declares retired names (broken) but has no ci/tests-error.nix";
+      test-owed-without-a-root-entry-is-a-named-refusal = refuses {
+        root = fx;
+      } "root-surface: owed (the default) but the root has no default.nix";
+      test-not-owed-over-a-root-entry-is-refused = refuses {
+        root = fx + "/set-root";
+        entry = "not-owed";
+      } "root-surface: declared not-owed but the root has a default.nix";
+      test-not-owed-with-retired-names-is-refused = refuses {
+        root = fx;
+        entry = "not-owed";
+        retired.gone = gone;
+      } "root-surface: declared not-owed but declares retired names (gone)";
+      test-an-undeclared-entry-value-is-refused = refuses {
+        root = fx;
+        entry = "maybe";
+      } "root-surface: `entry` must be \"owed\" or \"not-owed\"";
+    };
+
+    # The flake module's generated tombstone suite, over the fixture: the message is the one the
+    # root throws, so the cell PASSES; resurrecting `gone` to throw anything else fails it.
+    flake.testsError.root-surface-retired-fixture = (import ../root-surface.nix).retiredCells {
+      inherit lib;
+      root = fx + "/tomb";
+      retired = { inherit gone; };
+    };
+
     flake.testsError.escape-set = {
       # The answer is asserted, not merely the absence of an abort: `]` is passed through unescaped
       # and matched as the literal it already is, so the boolean is nixpkgs'.
