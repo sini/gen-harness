@@ -71,6 +71,20 @@ env:
   # which Lix to install by `--nix-package-url`.
   LIX_INSTALLER_URL: "https://install.lix.systems/lix/2.95.2/lix-installer-x86_64-linux"
   LIX_INSTALLER_SHA256: "57564e78a6d57126661fe5e793de70a72bacf9835ddb7c5c0cbfadf3db21545e"
+  # ★ A COLUMN DIFFERS FROM THE OTHERS ONLY IN ITS EVALUATOR (den-hoag-jutgv). Every installer-written
+  # setting that changes what an evaluation PRINTS or RESOLVES is stated here, handed to all three
+  # installers, and read back by `evaluator identity`, which refuses a column running anything else.
+  #   show-trace — cachix/install-nix-action writes `show-trace = true`; the other two do not. A full
+  #     trace prints source frames, so a stderr-absence cell reds in the `nix` column alone.
+  #   nix-path   — the Determinate and Lix installers write `extra-nix-path` (two different
+  #     nixpkgs); the `nix` column has none, so a `<nixpkgs>` lookup would resolve in two columns only.
+  # Installer lines left alone, because they change no evaluation output: max-jobs, cores,
+  # always-allow-substitutes, auto-optimise-store, bash-prompt-prefix, substituters and keys,
+  # trusted-users, netrc-file. Determinate's lazy-trees is stated at its install step, and its
+  # eval-cores is printed, not normalised.
+  EVAL_CONF: |
+    show-trace = false
+    nix-path =
 
 jobs:
   evaluate:
@@ -94,6 +108,9 @@ jobs:
         with:
           install_url: https://releases.nixos.org/nix/nix-${{ env.NIX_VERSION }}/install
           github_access_token: ${{ github.token }}
+          # Appended after the installer's own `show-trace = true`; the later line wins, and
+          # `evaluator identity` reads the value back rather than trusting that.
+          extra_nix_config: ${{ env.EVAL_CONF }}
 
       - name: install Determinate Nix ${{ env.DETERMINATE_VERSION }}
         if: matrix.evaluator == 'determinate'
@@ -102,7 +119,9 @@ jobs:
           source-tag: v${{ env.DETERMINATE_VERSION }}
           # Stated, never inherited from an install default: lazy-trees is the Determinate-specific
           # path, and the one measured Determinate divergence (gen-demo C53) was on it.
-          extra-conf: lazy-trees = true
+          extra-conf: |
+            lazy-trees = true
+            ${{ env.EVAL_CONF }}
 
       - name: install Lix ${{ env.LIX_VERSION }}
         if: matrix.evaluator == 'lix'
@@ -118,7 +137,8 @@ jobs:
           sudo ./lix-installer install linux --no-confirm \
             --nix-package-url "file://$RUNNER_TEMP/lix.tar.xz" \
             --extra-conf "access-tokens = github.com=$TOKEN" \
-            --extra-conf "trusted-users = root $USER"
+            --extra-conf "trusted-users = root $USER" \
+            --extra-conf "$EVAL_CONF"
           echo /nix/var/nix/profiles/default/bin >> "$GITHUB_PATH"
 
       - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
@@ -145,6 +165,19 @@ jobs:
             echo "lazy-trees = $lt; eval-cores = $(nix config show eval-cores)"
             [ "$lt" = true ] || { echo "::error::Determinate is running with lazy-trees = $lt"; exit 1; }
           fi
+          # EVAL_CONF, read back from the evaluator this column runs. `nix config show <k>` exits
+          # non-zero on a setting it cannot name, so a could-not-read fails here, never reads equal.
+          rc=0
+          while IFS= read -r l; do
+            [ -n "$l" ] || continue
+            k=${l%%=*}; k=${k% }; want=${l#*=}; want=${want# }
+            got=$(nix config show "$k")
+            echo "$k = $got"
+            [ "$got" = "$want" ] || { echo "::error::the ${{ matrix.evaluator }} column runs '$k = $got', not '$want'"; rc=1; }
+          done <<< "$EVAL_CONF"
+          # An environment NIX_PATH outranks the nix-path setting for a `<…>` lookup.
+          [ -z "${NIX_PATH:-}" ] || { echo "::error::NIX_PATH is set: $NIX_PATH"; rc=1; }
+          exit "$rc"
 
       - name: flake checks
         env:
