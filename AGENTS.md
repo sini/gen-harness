@@ -73,26 +73,27 @@ functions of `pkgs`, no flake-parts module, no gen input.
 
 ## Entry points by task
 
-| Task                                                      | Reach for                                                                                                                                        |
-| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Give a library a test flake                               | `gen-harness.lib.mkCi { inherit inputs; name; testModules; specialArgs; }` from its `ci/flake.nix`                                               |
-| Declare a test suite                                      | `flake.tests.<suite>.<cell> = { expr; expected; };` in a module under `testModules`                                                              |
-| Assert something that ABORTS                              | `flake.testsError`, reached through `extraModules` — never `flake.tests`                                                                         |
-| Declare paths the suite reads outside its collection root | `readRoots = [ ./fixtures ];` — added to `testModules`, not replacing it                                                                         |
-| Run every suite                                           | `nix develop ./ci --command ci` — guarded; bare `nix-unit --flake ./ci#tests` is unguarded, blind to an untracked cell                           |
-| Run the abort-capable cells                               | `nix develop ./ci --command ci --tests-error` — guarded; bare `nix-unit --flake ./ci#testsError` is unguarded                                    |
-| Clear a read-roots refusal                                | `git add` the git-unknown file, or move it out from under the root — any extension or name refuses, `_`-prefixed included                        |
-| Run them under the evaluator on `PATH` (Lix, Determinate) | the devshell's `ci --tests-error` — nix-unit links one upstream nix-expr whatever `nix` is installed                                             |
-| Run CI under upstream Nix, Determinate and Lix            | a job `uses: sini/gen-harness/.github/workflows/evaluators.yml@<the gen-harness rev in ci/flake.lock>`; `relock` keeps the sha equal to the lock |
-| Run a negative test with no pull request                  | the caller declares `workflow_dispatch`; push a scratch branch and `gh workflow run ci.yml --ref <branch>`                                       |
-| Run ONE cell                                              | the devshell's `ci <suite>.<cell>`, or `--flake ./ci#testSingletons.<suite>.<cell>`                                                              |
-| Run the gates                                             | `nix flake check ./ci` — never at the repository root; unguarded, so run `ci` too                                                                |
-| Format                                                    | `nix fmt` from `ci/`; `nix fmt -- --ci` to check without writing                                                                                 |
-| Add an mdformat plugin for one repository                 | `gen.ci.mdformat.extraPlugins = p: [ p.whatever ];`                                                                                              |
-| Change which plugins the whole ecosystem gets             | the `names` list in `mdformat-plugins.nix`, and nowhere else                                                                                     |
-| Gate a repository that has no nix-unit suite              | import the three `lib.checks.*` builders directly                                                                                                |
-| Override a tool for one consumer                          | declare it by the same input name in the consumer's `ci/flake.nix`                                                                               |
-| Use more of the prelude than `hasInfix`                   | not here — declare `gen-prelude` at the library's ROOT and pass `specialArgs.genPrelude`                                                         |
+| Task                                                      | Reach for                                                                                                                                               |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Give a library a test flake                               | `gen-harness.lib.mkCi { inherit inputs; name; testModules; specialArgs; }` from its `ci/flake.nix`                                                      |
+| Declare a test suite                                      | `flake.tests.<suite>.<cell> = { expr; expected; };` in a module under `testModules`                                                                     |
+| Assert something that ABORTS                              | `flake.testsError`, reached through `extraModules` — never `flake.tests`                                                                                |
+| Declare paths the suite reads outside its collection root | `readRoots = [ ./fixtures ];` — added to `testModules`, not replacing it                                                                                |
+| Run every suite                                           | `nix develop ./ci --command ci` — guarded; bare `nix-unit --flake ./ci#tests` is unguarded, blind to an untracked cell                                  |
+| Run the abort-capable cells                               | `nix develop ./ci --command ci --tests-error` — guarded; bare `nix-unit --flake ./ci#testsError` is unguarded                                           |
+| Clear a read-roots refusal                                | `git add` the git-unknown file, or move it out from under the root — any extension or name refuses, `_`-prefixed included                               |
+| Run them under the evaluator on `PATH` (Lix, Determinate) | the devshell's `ci --tests-error` — nix-unit links one upstream nix-expr whatever `nix` is installed                                                    |
+| Run CI under upstream Nix, Determinate and Lix            | a job `uses: sini/gen-harness/.github/workflows/evaluators.yml@<the gen-harness rev in ci/flake.lock>`; `relock` keeps the sha equal to the lock        |
+| Clear an `every-workflow-calls-evaluators` refusal        | `.github/workflows` exists and no job calls `evaluators.yml` (a `run:`-only job does not count): make the job the caller above, or remove the directory |
+| Run a negative test with no pull request                  | the caller declares `workflow_dispatch`; push a scratch branch and `gh workflow run ci.yml --ref <branch>`                                              |
+| Run ONE cell                                              | the devshell's `ci <suite>.<cell>`, or `--flake ./ci#testSingletons.<suite>.<cell>`                                                                     |
+| Run the gates                                             | `nix flake check ./ci` — never at the repository root; unguarded, so run `ci` too                                                                       |
+| Format                                                    | `nix fmt` from `ci/`; `nix fmt -- --ci` to check without writing                                                                                        |
+| Add an mdformat plugin for one repository                 | `gen.ci.mdformat.extraPlugins = p: [ p.whatever ];`                                                                                                     |
+| Change which plugins the whole ecosystem gets             | the `names` list in `mdformat-plugins.nix`, and nowhere else                                                                                            |
+| Gate a repository that has no nix-unit suite              | import the three `lib.checks.*` builders directly                                                                                                       |
+| Override a tool for one consumer                          | declare it by the same input name in the consumer's `ci/flake.nix`                                                                                      |
+| Use more of the prelude than `hasInfix`                   | not here — declare `gen-prelude` at the library's ROOT and pass `specialArgs.genPrelude`                                                                |
 
 ## Measured traps
 

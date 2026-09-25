@@ -261,6 +261,8 @@ let
         n
     ) 0 (builtins.attrNames set);
 
+  refusesNonCaller = f: f.hasWfDir && !(classify f).called;
+
   liveFacts = readOf {
     inherit name;
     src = root;
@@ -393,6 +395,10 @@ let
     # evaluating from that flake at all. A blind reader, or a root one directory off, reds here.
     reader-live = builtins.pathExists "${root}/ci/flake.nix";
     caller-ref-is-locked-harness = liveSkew == [ ];
+    # The three-evaluator ruling (den-hoag-lbtnv): a tree with a workflow directory runs its CI
+    # through `evaluators.yml`. `called` is the same `callsOf` reading the skew cell keys on, so a
+    # `run:`-only workflow, even one that runs the error plane, is not a call.
+    every-workflow-calls-evaluators = !refusesNonCaller liveFacts;
     # The seed's step is its fifth line; the witness coordinate is armed with the state.
     arming-runs = arm.runs.state == "runs" && arm.runs.witness.runs.line == 5;
     arming-unrun = arm.unrun.state == "declares-unrun";
@@ -407,6 +413,14 @@ let
     arming-caller-at-locked-rev = armSkew.caller == [ ];
     arming-caller-skew = builtins.length armSkew.caller-skew == 1;
     arming-remote-self-call = builtins.length armSkew.remote-self-call == 1;
+    # RED: a `run:`-only workflow, with or without the error-plane step. GREEN: a caller, declarer
+    # or not. CONTROL: no workflow directory at all.
+    arming-workflow-calls-evaluators =
+      refusesNonCaller seeds.runs
+      && refusesNonCaller seeds.noplane
+      && !refusesNonCaller seeds.caller
+      && !refusesNonCaller seeds.caller-noplane
+      && !refusesNonCaller seeds.nowf-noplane;
     arming-covers-states = lib.sort lib.lessThan armStates == lib.sort lib.lessThan states;
   };
   gateKeys = builtins.attrNames gate;
@@ -418,6 +432,7 @@ let
     no-undeclared-runner = "a workflow step invokes testsError and ci/tests-error.nix does not exist: the plane was renamed or removed while its step stayed. Restore the file or remove the step; a plane living on under another name is undeclared.";
     plane-non-vacuous = "ci/tests-error.nix is declared and the evaluated testsError holds 0 test-prefixed leaves: nix-unit would report 0/0 and exit 0, the false pass. Give the plane a cell or retire the file.";
     reader-live = "the reader cannot see ci/flake.nix under its root: the check is bound to the wrong tree. `root` must be inputs.self.sourceInfo.outPath.";
+    every-workflow-calls-evaluators = "this repository has .github/workflows and no job calls gen-harness's evaluators.yml, so its CI does not run under upstream Nix, Determinate and Lix. Replace the `run:` job with `jobs.ci.uses: sini/gen-harness/.github/workflows/evaluators.yml@<the gen-harness rev in ci/flake.lock>` (`relock` writes the sha), or remove the workflow directory.";
     caller-ref-is-locked-harness = "a `uses: sini/gen-harness/.github/workflows/evaluators.yml@<sha>` line names a revision other than the gen-harness this ci is locked to (${toString harnessRev}), or this tree defines evaluators.yml itself and calls a published copy. Run `relock`, which rewrites the sha to the locked rev; gen-harness calls its own workflow locally (`uses: ./.github/workflows/evaluators.yml`).";
   };
   armingRepair = "an arming cell stopped firing: the classifier or the leaf counter no longer discriminates the state its seed encodes. A guard that can no longer refuse is not a passing guard; repair the predicate, never the seed.";
