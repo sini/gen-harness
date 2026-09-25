@@ -25,12 +25,15 @@
 #
 # ★ WHAT A GREEN COLUMN COVERS. Each column's own `nix` evaluates, in-process: every `nix flake
 # check` line (so `checks.default`, the batch asserter over `flake.tests`, and every check's
-# derivation), the ci devShell, and the error plane through `ci --tests-error`.
+# derivation), the ci devShell, the error plane through `ci --tests-error`, and the process plane
+# (`apps.<system>.tests-process`, per-process cells on abort channels) through `ci --tests-process`,
+# which runs the program OUTSIDE the sandbox and refuses one carrying an evaluator in its closure
+# (den-hoag-jutgv). Both plane steps are keyed on their file name: a plane declared under any other
+# name is skipped silently here.
 # ★ WHAT IT DOES NOT COVER: a check that runs `nix-instantiate`/`nix eval` INSIDE its build sandbox
 # evaluates with the ci-locked nixpkgs `pkgs.nix`, identically in all three columns — its drvPath is
-# the same under all three evaluators. gen-scope's `checks.tests-process` is the measured member
-# (den-hoag-jutgv); gen-harness's own `relock-behaviour` runs `pkgs.nix` in its sandbox too. A Lix or
-# Determinate green is NOT a claim about the cells such a check evaluates.
+# the same under all three evaluators. gen-harness's own `relock-behaviour` is the remaining member.
+# A Lix or Determinate green is NOT a claim about the cells such a check evaluates.
 #
 # ★ THE `nix` COLUMN CAN RUN TWO UPSTREAM VERSIONS. Its evaluator is NIX_VERSION below; its extra
 # `nix-unit` step — kept because it alone checks `expectedError.type` — is nix-unit's own binary,
@@ -172,6 +175,15 @@ jobs:
           nix develop ./ci --command ci --tests-error | tee "$RUNNER_TEMP/tests-error.log"
           # The runner must have judged the plane with THIS column's evaluator.
           grep -Fxq "evaluator: $(nix --version | sed -n 1p)" "$RUNNER_TEMP/tests-error.log"
+
+      - name: process plane (ci --tests-process)
+        if: hashFiles('ci/tests-process.nix') != ''
+        run: |
+          nix develop ./ci --command ci --tests-process | tee "$RUNNER_TEMP/tests-process.log"
+          # The cells must have run under THIS column's evaluator. The line is printed by the
+          # program's own process from the binary its cells call, so it is compared with the
+          # column's `nix-instantiate`, not with `nix`.
+          grep -Fxq "evaluator: $(nix-instantiate --version | sed -n 1p)" "$RUNNER_TEMP/tests-process.log"
 
       - name: error plane, by type (nix-unit, on the ci-locked upstream nix-expr)
         if: matrix.evaluator == 'nix' && hashFiles('ci/tests-error.nix') != ''

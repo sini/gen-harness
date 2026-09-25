@@ -131,7 +131,11 @@ Each of the three columns installs its own evaluator at a pinned version and run
 and, where `ci/tests-error.nix` exists, runs the error plane through `ci --tests-error`. That
 devshell argument evaluates every `testsError` cell with the `nix` on `PATH`, one process per cell,
 because nix-unit is linked against one upstream nix-expr whatever evaluator is installed. The `nix`
-column also keeps the nix-unit step, which alone checks `expectedError.type`. Formatting runs once.
+column also keeps the nix-unit step, which alone checks `expectedError.type`. Where
+`ci/tests-process.nix` exists, the process plane runs through `ci --tests-process`: the consumer's
+`apps.<system>.tests-process` program, run outside the sandbox so its cells call the column's
+`nix-instantiate`, and refused if its closure carries an evaluator (`process-plane.nix`). Formatting
+runs once.
 
 A green column does not cover a check that evaluates inside its build sandbox through `pkgs.nix`:
 that evaluation is the same in all three columns.
@@ -198,6 +202,7 @@ harness wires beside `ci` off the same guard. That holds whether they assert the
 ```
 nix develop ./ci -c ci               # the suites, behind the read-roots guard
 nix develop ./ci -c ci --tests-error # the cells whose expr can abort, under the nix on PATH, guarded
+nix develop ./ci -c ci --tests-process # per-process cells (apps.<system>.tests-process), under the nix on PATH
 nix flake check                      # in ci/ — treefmt, tree-root oracle, hooks; unguarded
 nix-unit --flake ./ci#tests          # the suites, unguarded
 nix-unit --flake ./ci#testsError     # the abort-capable cells, unguarded

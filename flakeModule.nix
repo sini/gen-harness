@@ -336,6 +336,8 @@ in
           inherit pkgs name;
           scanner = selfInput.scanner;
         };
+
+        processPlaneCmd = import ./process-plane.nix { inherit pkgs name; };
       in
       {
         # Pre-commit hooks: format check + unit tests
@@ -579,7 +581,7 @@ in
           commands = [
             {
               name = "ci";
-              help = "Run all checks, or a specific test [ci] [ci suite] [ci suite.test] [ci --tests-error]";
+              help = "Run all checks, or a specific test [ci] [ci suite] [ci suite.test] [ci --tests-error] [ci --tests-process]";
               command = ''
                 # The read-roots guard runs BEFORE nix-unit at all three invocation points the
                 # harness itself wires — this one and the two pre-commit hooks — because a hole at
@@ -606,6 +608,13 @@ in
                 # must (den-hoag-a0ig9): an untracked cell file is as invisible to it as to nix-unit.
                 if [ "''${1:-}" = "--tests-error" ]; then
                   exec ${pkgs.python3}/bin/python3 ${./error-plane-runner.py} "$FLAKE_ROOT"
+                fi
+
+                # `ci --tests-process`: the process plane (`apps.<system>.tests-process`) run under
+                # the `nix` on PATH, after the same guard, for the same reason (`process-plane.nix`
+                # states the consumer's contract and refuses a program carrying an evaluator).
+                if [ "''${1:-}" = "--tests-process" ]; then
+                  exec "${processPlaneCmd}/bin/${name}-ci-tests-process" "$FLAKE_ROOT"
                 fi
 
                 # A `suite.test` arg must target the `testSingletons` view: nix-unit treats the attrpath

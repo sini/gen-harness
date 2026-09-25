@@ -86,10 +86,12 @@
       #
       # `relock-behaviour.nix` adds a flake CHECK and no cells at all: its arms are the exit codes
       # and messages of a built command over synthetic trees, which no `expr`/`expected` pair can
-      # express.
+      # express. `process-plane-guard.nix` is the same kind: the `ci --tests-process` closure
+      # guard's exit codes and messages over real fixture closures.
       extraModules = [
         ./tests-error.nix
         ./relock-behaviour.nix
+        ./process-plane-guard.nix
       ];
     };
 }

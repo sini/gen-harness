@@ -83,6 +83,11 @@
     # published surface by construction rather than by discipline.
     lib.relock = import ./relock.nix;
 
+    # `ci --tests-process`, published for the same reason as `lib.relock`: its guard
+    # (`passthru.guard`) is driven by this repository's own `process-plane-guard` check, which can
+    # only name what is published. `{ pkgs, name }` -> the command derivation.
+    lib.processPlane = import ./process-plane.nix;
+
     # ★ THE BATCH ASSERTER'S FAILURE MESSAGE, PUBLISHED BECAUSE IT IS OTHERWISE UNREACHABLE EXCEPT
     # BY FAILING. `flakeModule.nix` calls it on one arm — the arm where a cell has already failed
     # — so the only value it was ever read at was a value that had already taken `checks.default`
