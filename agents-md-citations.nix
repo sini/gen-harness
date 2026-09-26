@@ -25,13 +25,35 @@
 # already is — by the `Tests:` anchor, whose named cells re-verify on every run instead of resting
 # on a one-time eval. This check makes that anchor load-bearing by refusing to let it dangle.
 #
-# ★ A BARE COORDINATE STATES NO CONTENT, SO IN-RANGE DRIFT IS INVISIBLE TO IT. `path.nix:N` is
-# checked only for `N <= linecount`: a body that moved while the old number stays in range reads
-# green. The ANCHORED COORDINATE `path.nix:N:ident` (or `path.nix:N-M:ident`) attaches a content
-# predicate — `ident` must occur as a WHOLE IDENTIFIER on line N, the FIRST line of a range — and a
-# red names every line the anchor now sits on, which is the repair. Both forms are admitted; the
-# anchored one is the one that can see a move. Whether the bare form stays admitted is not this
-# check's decision.
+# ★ A BARE COORDINATE STATES NO CONTENT, SO IT IS REFUSED. `path.nix:N` could be checked only for
+# `N <= linecount`: a body that moved while the old number stays in range read green, and no
+# predicate over a position can tell a moved body from an unmoved one. The ANCHORED COORDINATE
+# `path.nix:N:ident` (or `path.nix:N-M:ident`) attaches a content predicate — `ident` must occur as
+# a WHOLE IDENTIFIER on line N, the FIRST line of a range — and a red names every line the anchor
+# now sits on, which is the repair. So the bare form (`path.nix:N`, `:N-M`, or a list) is refused
+# by its FORM, in range or not, and so is a PATH-LESS coordinate, a span opening with `:` and a
+# digit (`:18`, `:118-120`, the continuation after a cited path), or a LINE:COLUMN pair (`48:39`),
+# which names a position and not even a file. The admitted forms are the anchored coordinate and the
+# name citation below. A value opening with `:` and a digit (a port, `:8080`) is refused too, and
+# so is a value written exactly `N:M` (a ratio `16:9`, a clock `12:30`). Such a value reds by name;
+# write it outside backticks or with a word.
+#
+# ★ WHAT THE REFUSAL DOES NOT REACH, named so a green is not read as "no line numbers here". It
+# refuses those SPAN SHAPES, not line-number citation as such. These stay admitted and unverified:
+#   · DE-CITATION: a span with its backticks removed is in no bucket at all, and so is
+#     `path.nix` followed by "line N" in prose.
+#   · FAMILY ABSORPTION: a space, `*`, `{`, `,`, `|` or `…` inside the backticks (`path.nix :N`)
+#     makes the span a family.
+#   · A BARE NUMERAL OR RANGE (`25,28`, `47-63`): shape-identical to a value, so refusing it would
+#     red values.
+#   · A LINE:COLUMN RANGE OR TRIPLE (`48:39-50:33`, `10:05:30`): only the exact pair `N:M` is
+#     refused, because a longer digit-colon span can be a value.
+#   · AN UNBACKTICKED COORDINATE, a cross-repository one included: the classifier reads backticked
+#     spans only, and a scan of unbackticked text was measured at 79% false reds.
+#   · A NON-`.nix` TARGET (`README.md:N`): the excluded axis, stated at the classification below.
+# Only a BACKTICKED span on a `.nix` path is verified. An anchored-looking span outside that
+# (`README.md:N:ident`, an unbackticked `other-repo/lib/x.nix:N:ident`) shares the verified form's
+# syntax and is checked by nothing.
 #
 # ★ A NAME CITATION `path.nix:name` CLAIMS A DEFINITION, NOT AN OCCURRENCE: it resolves only on a
 # line where the name stands in a BINDER position, so a mention in prose, a use site or a builtin
@@ -333,6 +355,13 @@ let
       # contain `:`; the first character after a coordinate's `:` is a digit and an anchor's is
       # not; a list needs a comma no other shape admits; and an anchored coordinate starts with a
       # digit after its first `:` and carries a second `:` that no coordinate or list admits.
+      # PLESSRE, the path-less coordinate, has two arms. The `:`-digit arm is a PREFIX and not a
+      # whole shape, because every span it matches is refused alike. A value opening with `:` and
+      # a digit (a port, `:8080`) is refused too, and so is a value written exactly `N:M` (a
+      # ratio `16:9`, a clock `12:30`). Such a value reds by name; write it outside backticks or
+      # with a word. The LINE:COLUMN arm is a WHOLE shape, because a longer digit-colon span
+      # (`10:05:30`) can be a value. Both are disjoint from the rest: no cell name or path opens
+      # with `:`, and a line:column pair carries no `.nix` and no `test-`.
       PATHRE   = "[A-Za-z0-9_./+-]*[A-Za-z0-9_+-]\\.nix"
       CELLRE   = "^([A-Za-z0-9_-]+\\.)?test-[A-Za-z0-9_'-]+$"
       FILERE   = "^" PATHRE "$"
@@ -340,6 +369,7 @@ let
       ANCHORRE = "^" PATHRE ":[A-Za-z_'][A-Za-z0-9_'-]*$"
       LISTRE   = "^" PATHRE ":[0-9]+(-[0-9]+)?(, ?[0-9]+(-[0-9]+)?)+$"
       ACOORDRE = "^" PATHRE ":[0-9]+(-[0-9]+)?:[A-Za-z_'][A-Za-z0-9_'-]*$"
+      PLESSRE  = "^(:[0-9]|[0-9]+:[0-9]+$)"
       # The name alphabet, as a one-character class: the boundary `wholeword` reads. It is
       # CELLRE's own trailing class and ANCHORRE's, and those are the SAME set — which is what
       # lets one boundary serve both recognisers. All three have to stay the same set or a legal
@@ -441,6 +471,7 @@ let
             if (candidates(span, C) == 0 && !(span in SEEN)) { SEEN[span] = 1; badFiles[++nBadF] = span }
           }
           else if (span ~ COORDRE || span ~ LISTRE) {
+            if (!(span in BARESEEN)) { BARESEEN[span] = 1; bare[++nBare] = span }
             if (span ~ LISTRE) nList++; else nCoords++
             p = index(span, ":")
             d = resolve(substr(span, 1, p - 1), "coord", maxline(substr(span, p + 1)), C)
@@ -458,6 +489,11 @@ let
             p = index(span, ":")
             d = resolve(substr(span, 1, p - 1), "anchor", substr(span, p + 1), C)
             if (d != "" && !((span d) in SEEN)) { SEEN[span d] = 1; badAnchors[++nBadA] = span d }
+          }
+          # Before the family test, which a path-less list (`:13, :18`) would otherwise satisfy.
+          else if (span ~ PLESSRE) {
+            nPless++
+            if (!(span in BARESEEN)) { BARESEEN[span] = 1; bare[++nBare] = span }
           }
           else if (span ~ /[ *{,|]/ || index(span, "…") > 0) nFamily++
           else if (index(span, "test-") > 0 || index(span, ".nix") > 0) {
@@ -481,10 +517,12 @@ let
       # compatible with no other drift disposition, because each forces a classified counter above
       # zero by construction: badFiles ⇒ nFiles > 0, badCoords ⇒ nCoords + nList > 0,
       # badACoords ⇒ nACoords > 0, badAnchors ⇒ nAnchors > 0, badCells and badSuites ⇒
-      # nCells > 0. So this is one conjunct and not a class, and the verdict is exit 1 either
-      # way — what it decides is which of two true things the operator is told.
+      # nCells > 0, a bare coordinate ⇒ nCoords + nList > 0. So this is one conjunct and not a
+      # class, and the verdict is exit 1 either way — what it decides is which of two true things
+      # the operator is told. A path-less coordinate forces no classified counter, so `nPless` is
+      # the second conjunct of the same ordering: a region holding only those reds with each NAMED.
       classified = nCells + nFiles + nCoords + nAnchors + nList + nACoords
-      if (classified == 0 && nUnc == 0)
+      if (classified == 0 && nUnc == 0 && nPless == 0)
         die("CONTROL FAILED: the declared region carries no classified citation (cells=0 files=0 " \
             "coords=0 anchors=0 list=0 acoords=0); it asserts nothing this guard can check")
 
@@ -539,7 +577,7 @@ let
                 " list=" nList+0 " family=" nFamily+0 " prose=" nProse+0 " unclassified=" nUnc+0 \
                 " acoords=" nACoords+0
 
-      if (nBadCe + nBadSu + nBadF + nBadC + nBadAC + nBadA + nUnc == 0) {
+      if (nBadCe + nBadSu + nBadF + nBadC + nBadAC + nBadA + nUnc + nBare == 0) {
         print "── " NAME "-agents-md-citations ──"
         print "region declared; " summary
         exit 0
@@ -551,6 +589,10 @@ let
       if (nBadCe) print "CITATION DRIFT -- cells no suite defines: " join(badCells, nBadCe) > "/dev/stderr"
       if (nBadSu) print "CITATION DRIFT -- cells the cited suite does not define: " join(badSuites, nBadSu) > "/dev/stderr"
       if (nBadF)  print "CITATION DRIFT -- files that do not exist: " join(badFiles, nBadF) > "/dev/stderr"
+      if (nBare) {
+        print "CITATION UNBOUND -- bare or path-less coordinates state no content this check can verify: " join(bare, nBare) > "/dev/stderr"
+        print "  cite path.nix:N:ident (a token the row is about, on line N) or path.nix:name (a binding)." > "/dev/stderr"
+      }
       if (nBadC)  print "CITATION DRIFT -- coordinates that do not resolve: " join(badCoords, nBadC) > "/dev/stderr"
       if (nBadAC) print "CITATION DRIFT -- anchored coordinates that do not resolve: " join(badACoords, nBadAC) > "/dev/stderr"
       if (nBadA) {
