@@ -143,12 +143,13 @@ jobs:
           echo /nix/var/nix/profiles/default/bin >> "$GITHUB_PATH"
 
       - uses: DeterminateSystems/magic-nix-cache-action@84c0677f58dcedf3b91f8223ce36a9ea5b3c84b7 # v15
-        # A cache is not an evaluator: if it cannot start under a column's install, that column must
-        # not red for it — a false evaluator attribution is the one thing this matrix exists to avoid.
-        # FlakeHub Cache turns on opportunistically once determinate-nixd is present (default: null,
-        # per the action's own `use-flakehub` input); none of these repos are FlakeHub-registered and
-        # none grant `id-token: write`, so left at the default it always fails auth — a failure-level
-        # annotation on every green run, masked only by continue-on-error. Disabled explicitly.
+        # den-hoag-uer2v OQ1 arm (b), owner-ruled default (defaulted, reversible): the determinate
+        # column's cache Post step was the single largest job-minute cost in a relock pass (23.3 of
+        # 44.4 job-min, R35 pass 1), almost all of it re-uploading what the same job just downloaded.
+        # Dropped here for the determinate column only, priced at 103s -> 79s/job (den-hoag-uer2v
+        # arm-b-price, 2 runs) against the ~16.3s/job cost of rebuilding what the cache substituted
+        # (nix-unit-2.35.1, not on cache.nixos.org). nix and lix keep the cache unconditionally.
+        if: matrix.evaluator != 'determinate'
         with:
           use-flakehub: "disabled"
         continue-on-error: true
