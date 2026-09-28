@@ -13,6 +13,12 @@
 # and a third silent recurrence. Spec: den-ag-design
 # `specs/2026-09-13-ci-plane-coverage-checker-spec.md`; every figure below is measured there.
 #
+# ★ THE TWO COVERAGE DIRECTIONS ARE RETIRED (den-hoag-o7kjc). A declarer's plane now runs as
+# `checks.tests-error` inside `nix flake check ./ci` in every column, and a check cannot be declared
+# and unrun, so the gate no longer carries `every-declared-plane-runs` or `no-undeclared-runner`.
+# The classifier and its arming still read every state below; `plane-non-vacuous`, `reader-live`,
+# `caller-ref-is-locked-harness` and `every-workflow-calls-evaluators` still gate.
+#
 # ★ DECLARES IS THE FILE — never the flake output and never a lexical mention. Two declarers carry
 # the plane and never spell `testsError` in their own text (mkCi produces the output for them), and
 # the output is unreachable from every vantage but the flake's own.
@@ -28,7 +34,7 @@
 # `classify` is total over a facts record and never sees a path. The split is what lets the arming
 # feed SYNTHETIC facts records: no fixture directory exists anywhere, so nothing outside this file
 # can move its arming, and a correct build that lands, moves or retires a real plane cannot break
-# an arming green — the only cells such a build moves are the two coverage cells, which should move.
+# an arming green.
 # `plane-non-vacuous` is the one cell outside the split, deliberately: its unit is `test`-prefixed
 # LEAVES of the EVALUATED `testsError` (what nix-unit collects), which no text-only record carries,
 # so it reads the flake's own sibling output and is armed on a nested attrset of that same type.
@@ -399,12 +405,6 @@ let
   };
 
   gate = {
-    every-declared-plane-runs =
-      !(builtins.elem live.state [
-        "declares-unrun"
-        "declares-no-workflow-dir"
-      ]);
-    no-undeclared-runner = live.state != "runs-undeclared";
     # With the `declares` antecedent: a non-declarer has `testsError = { }` and did nothing wrong.
     plane-non-vacuous = !live.declares || liveCells > 0;
     # The universal positive control: the one file whose absence is impossible if this check is
@@ -448,8 +448,6 @@ let
   allOk = failed == [ ];
 
   repair = {
-    every-declared-plane-runs = "this repository declares an error plane (ci/tests-error.nix) and no workflow step runs it. Add `- run: nix develop --command nix-unit --flake .#testsError` (`./ci#testsError` from the repository root) to a step in .github/workflows/*.yml, or retire the plane file with the cells it carries.";
-    no-undeclared-runner = "a workflow step invokes testsError and ci/tests-error.nix does not exist: the plane was renamed or removed while its step stayed. Restore the file or remove the step; a plane living on under another name is undeclared.";
     plane-non-vacuous = "ci/tests-error.nix is declared and the evaluated testsError holds 0 test-prefixed leaves: nix-unit would report 0/0 and exit 0, the false pass. Give the plane a cell or retire the file.";
     reader-live = "the reader cannot see ci/flake.nix under its root: the check is bound to the wrong tree. `root` must be inputs.self.sourceInfo.outPath.";
     every-workflow-calls-evaluators = "this repository has .github/workflows and no job calls gen-harness's evaluators.yml, so its CI does not run under upstream Nix, Determinate and Lix. Replace the `run:` job with `jobs.ci.uses: sini/gen-harness/.github/workflows/evaluators.yml@<the gen-harness rev in ci/flake.lock>` (write any 40-hex sha, then `relock` rewrites it), or remove the workflow directory.";

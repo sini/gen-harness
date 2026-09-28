@@ -6,9 +6,10 @@
 # the root at the point it declares and forces every name it publishes.
 #
 # ★ WHAT THE GREEN SAYS, AND NOTHING MORE. At this library's own declared point (`import <root> { }`,
-# or the root itself when it is a set), every published name evaluates to WHNF, except the declared
-# tombstones, each of which throws exactly its declared message. For a roster member the declared
-# point is its root-lock pins, which is exactly what a standalone consumer receives. A root whose
+# or the root itself when it is a set), every published name evaluates to WHNF, and every declared
+# tombstone throws. For a roster member the declared point is its root-lock pins, which is exactly
+# what a standalone consumer receives. That a tombstone's message is EXACTLY its declared text is the
+# error plane's half, and it is judged at a different point — see TOMBSTONES below. A root whose
 # defaults are NOT root-lock pins is held at whatever those defaults are, and the green says only
 # that: gen-vars' `lib ? null` point walks 19 of the 29 names its flake's `lib` publishes. It says
 # nothing about the library applied at any other point; the hub's and the corpus's application (f at
@@ -41,9 +42,16 @@
 # ★ TOMBSTONES ARE TOP-LEVEL NAMES, DECLARED WITH THEIR EXACT MESSAGE. `retired.<name> = <msg>`
 # excludes the name from the walk and refuses the declaration if the name is absent or no longer
 # throws. That a tombstone throws EXACTLY its message cannot be read here — Nix exposes no thrown
-# message to evaluation — so `retiredCells` below generates one error-plane cell per entry, forced at
-# the root seam, and the error plane pins the message. A declaration is therefore refused where no
-# error plane (`ci/tests-error.nix`) exists: the cell would be generated and never run in CI.
+# message to evaluation — so `retiredCells` below generates one error-plane cell per entry, and the
+# error plane pins the message. A declaration is therefore refused where no error plane
+# (`ci/tests-error.nix`) exists: the cell would be generated and never run in CI.
+# ★ THE GUARANTEE IS SPLIT ACROSS TWO POINTS (den-hoag-o7kjc). `check` holds "the name throws" at
+# the declared point (root-lock pins, outside the sandbox). `retiredCells` holds "the message is
+# exactly `m`" with the root applied through its `src`/`inputs` seam to `./ci`'s inputs, so the cell
+# never fetches inside the error plane's offline sandbox. The two together say "a standalone
+# consumer receives exactly `m`" only because a tombstone's message is a CLOSED LITERAL in the root's
+# own tree, the same text at either point; a message interpolating, or a value reachable through, a
+# dependency value is outside that premise, and neither half would see the difference.
 # A nested tombstone is not expressible; the walk reds on it and names its path.
 let
   # s0: the root at its declared point. Arity dispatch because neither `import p` nor
@@ -116,18 +124,40 @@ in
     else
       owed;
 
-  # One error-plane cell per declared tombstone, forced AT THE ROOT SEAM, asserting the exact
-  # message. Merged into `flake.testsError` by the flake module.
+  # One error-plane cell per declared tombstone, asserting the exact message. Merged into
+  # `flake.testsError` by the flake module. The root is applied with its dependencies from `./ci`'s
+  # `inputs` and its `src` closed — the resolver seam the roster's root shims declare so a caller can
+  # make fetching impossible — so a dependency absent from `./ci` is refused by name in every column,
+  # never fetched by whichever evaluator happens to reach the network. A root that takes formals and
+  # no `src` cannot be closed, and is refused by name rather than silently left open.
   retiredCells =
     {
       lib,
       root,
       retired,
+      inputs,
     }:
+    let
+      seam = {
+        inputs = builtins.mapAttrs (_: i: i.lib) inputs;
+        src =
+          segs:
+          throw "root-surface: a retired-name cell resolves the root's dependencies from ./ci's inputs and never fetches; `${builtins.concatStringsSep "." segs}` is not an input of ./ci";
+      };
+      f = import root;
+      formals = builtins.functionArgs f;
+      closed =
+        if !builtins.isFunction f then
+          f
+        else if formals != { } && !(formals ? src) then
+          throw "root-surface: the root takes formals (${builtins.concatStringsSep ", " (builtins.attrNames formals)}) and no `src`; a retired-name cell closes fetching through the root's `src` formal, so this root would fetch inside the error plane's sandbox. Declare `src` as the roster's root shims do"
+        else
+          f (builtins.intersectAttrs formals seam);
+    in
     lib.mapAttrs' (
       n: m:
       lib.nameValuePair "test-retired-${n}" {
-        expr = (point root).${n};
+        expr = closed.${n};
         expectedError = {
           type = "ThrownError";
           msg = "^" + lib.escapeRegex m + "$";

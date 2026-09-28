@@ -26,6 +26,12 @@
     import-tree.url = "github:denful/import-tree/a164a12202f58eb67559bd33b5592f20660d9baf";
     git-hooks-nix.url = "github:cachix/git-hooks.nix";
     git-hooks-nix.inputs.nixpkgs.follows = "nixpkgs";
+    # The error plane's three ENGINES (`error-plane-engines.nix`), each at the release `evaluators.yml`
+    # pins for its column and with no `follows`, so the out path is the one the column installs.
+    # `ci/tests/engine-pins.nix` holds each equal to its pin.
+    nix-upstream.url = "github:NixOS/nix/2.35.2";
+    nix-determinate.url = "github:DeterminateSystems/nix-src/v3.22.5";
+    nix-lix.url = "https://git.lix.systems/lix-project/lix/archive/2.95.3.tar.gz";
   };
 
   outputs = inputs: {

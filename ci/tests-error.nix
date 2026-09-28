@@ -114,6 +114,46 @@ in
       inherit lib;
       root = fx + "/tomb";
       retired = { inherit gone; };
+      inputs = { };
+    };
+    flake.testsError.root-surface-retired-shim = (import ../root-surface.nix).retiredCells {
+      inherit lib;
+      root = fx + "/tomb-shim";
+      retired = { inherit gone; };
+      inputs.dep-a.lib = { };
+    };
+    flake.testsError.root-surface-retired-shim-closed = {
+      test-an-absent-dependency-is-refused-not-fetched = {
+        expr =
+          ((import ../root-surface.nix).retiredCells {
+            inherit lib;
+            root = fx + "/tomb-shim";
+            retired = { inherit gone; };
+            inputs = { };
+          }).test-retired-gone.expr;
+        expectedError = {
+          type = "ThrownError";
+          msg = "root-surface: a retired-name cell resolves the root's dependencies from ./ci's inputs and never fetches; `dep-a` is not an input of ./ci";
+        };
+      };
+    };
+
+    # A root whose formals carry no `src` cannot be closed: refused by name, even with every
+    # dependency in the bag, never left to fetch.
+    flake.testsError.root-surface-retired-nosrc = {
+      test-a-root-without-a-src-formal-is-refused = {
+        expr =
+          ((import ../root-surface.nix).retiredCells {
+            inherit lib;
+            root = fx + "/tomb-nosrc";
+            retired = { inherit gone; };
+            inputs.dep-a.lib = { };
+          }).test-retired-gone.expr;
+        expectedError = {
+          type = "ThrownError";
+          msg = lib.escapeRegex "root-surface: the root takes formals (a, inputs) and no `src`; a retired-name cell closes fetching through the root's `src` formal";
+        };
+      };
     };
 
     flake.testsError.escape-set = {

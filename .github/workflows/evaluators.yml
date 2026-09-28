@@ -25,16 +25,20 @@
 #
 # ★ WHAT A GREEN COLUMN COVERS. Each column's own `nix` evaluates, in-process: every `nix flake
 # check` line (so `checks.default`, the batch asserter over `flake.tests`, and every check's
-# derivation), the ci devShell, the error plane through `ci --tests-error`, and the process plane
-# (`apps.<system>.tests-process`, per-process cells on abort channels) through `ci --tests-process`,
-# which runs the program OUTSIDE the sandbox and refuses one carrying an evaluator in its closure
-# (den-hoag-jutgv). Both plane steps are keyed on their file name: a plane declared under any other
-# name is skipped silently here.
-# ★ WHAT IT DOES NOT COVER: a check that runs `nix-instantiate`/`nix eval` INSIDE its build sandbox
-# evaluates with the ci-locked nixpkgs `pkgs.nix`, identically in all three columns — its drvPath is
-# the same under all three evaluators. A Lix or Determinate green is NOT a claim about the cells such
-# a check evaluates. No such check remains in gen-harness: its `relock` behaviour arms, the last
-# member, are its process plane (den-hoag-348bq).
+# derivation) and the ci devShell. A declarer's error plane is one of those checks,
+# `checks.tests-error` (gen-harness `error-plane-check.nix`): it builds THIS column's evaluator
+# release from the harness's engine input and runs every cell with it in the build sandbox, and
+# `evaluator identity` refuses a column whose running `nix` is not that engine's store path. The
+# process plane (`apps.<system>.tests-process`, per-process cells on abort channels) runs through
+# `ci --tests-process`, OUTSIDE the sandbox, and refuses one carrying an evaluator in its closure
+# (den-hoag-jutgv); its steps are keyed on its file name, so a plane declared under any other name
+# is skipped silently here.
+# ★ WHAT IT DOES NOT COVER: any OTHER check that runs `nix-instantiate`/`nix eval` INSIDE its build
+# sandbox evaluates with the ci-locked nixpkgs `pkgs.nix`, identically in all three columns — its
+# drvPath is the same under all three evaluators. A Lix or Determinate green is NOT a claim about
+# the cells such a check evaluates. An in-sandbox evaluator is column-true only when it is the
+# family engine, as `checks.tests-error`'s is. No other such check remains in gen-harness: its
+# `relock` behaviour arms are its process plane (den-hoag-348bq).
 #
 # ★ THE `nix` COLUMN CAN RUN TWO UPSTREAM VERSIONS. Its evaluator is NIX_VERSION below; its extra
 # `nix-unit` step — kept because it alone checks `expectedError.type` — is nix-unit's own binary,
@@ -62,7 +66,9 @@ on:
         type: string
         default: ci
 
-# ★ THE ONE PLACE THE THREE EVALUATORS ARE PINNED.
+# ★ THE ONE PLACE THE THREE EVALUATORS ARE PINNED. The error plane's engine inputs (gen-harness
+# `flake.nix`: nix-upstream, nix-determinate, nix-lix) carry the same versions, and
+# `ci/tests/engine-pins.nix` reds gen-harness when a pin and its input part — a bump moves both.
 env:
   NIX_VERSION: "2.35.2" # latest: https://nixos.org/nix/install -> releases.nixos.org/nix/nix-<v>/install
   DETERMINATE_VERSION: "3.22.5" # latest: github.com/DeterminateSystems/nix-installer/releases/latest
@@ -185,6 +191,14 @@ jobs:
           done <<< "$EVAL_CONF"
           # An environment NIX_PATH outranks the nix-path setting for a `<…>` lookup.
           [ -z "${NIX_PATH:-}" ] || { echo "::error::NIX_PATH is set: $NIX_PATH"; rc=1; }
+          # The error-plane engine (`checks.tests-error`) must be the binary this column runs: the
+          # same store path, not the same family or version.
+          if [ -f ci/tests-error.nix ]; then
+            running=$(dirname "$(dirname "$(readlink -f "$(command -v nix)")")")
+            engine=$(nix eval --raw "./ci#checks.x86_64-linux.tests-error.engine")
+            echo "error-plane engine: $engine"
+            [ "$engine" = "$running" ] || { echo "::error::the ${{ matrix.evaluator }} column's error-plane engine $engine is not its evaluator $running"; rc=1; }
+          fi
           exit "$rc"
 
       - name: flake checks
@@ -209,13 +223,6 @@ jobs:
           sys=$(nix eval --impure --raw --expr builtins.currentSystem)
           nix eval --raw "./ci#devShells.$sys.default.drvPath"
           echo
-
-      - name: error plane, by message (ci --tests-error)
-        if: hashFiles('ci/tests-error.nix') != ''
-        run: |
-          nix develop ./ci --command ci --tests-error | tee "$RUNNER_TEMP/tests-error.log"
-          # The runner must have judged the plane with THIS column's evaluator.
-          grep -Fxq "evaluator: $(nix --version | sed -n 1p)" "$RUNNER_TEMP/tests-error.log"
 
       # ★ CI ONLY, AND ONE BINARY AT A TIME (den-hoag-348bq). A process-plane program may make its
       # own network namespace (gen-harness's `relock` arms do), and these runners refuse

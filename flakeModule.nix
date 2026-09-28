@@ -158,7 +158,8 @@ in
       Top-level tombstones: `<name> = <the EXACT message its throw carries>`. Each name is excluded
       from the walk, refused if absent or no longer throwing, and pinned to its message by one
       generated `flake.testsError.root-surface-retired.test-retired-<name>` cell forced at the root
-      seam. Refused where `ci/tests-error.nix` is absent, since no CI step would run that cell.
+      seam, with its dependencies from `./ci`'s inputs. Refused where `ci/tests-error.nix` is absent,
+      since no CI step would run that cell.
     '';
   };
 
@@ -169,7 +170,7 @@ in
     # declarer gets the suite, and the check refuses a declarer with no plane file to run it.
     flake.testsError = lib.mkIf (rsRetired != { }) {
       root-surface-retired = rootSurface.retiredCells {
-        inherit lib;
+        inherit lib inputs;
         root = inputs.self.sourceInfo.outPath;
         retired = rsRetired;
       };
@@ -383,6 +384,23 @@ in
         };
 
         processPlaneCmd = import ./process-plane.nix { inherit pkgs name; };
+
+        # The error plane as CHECKS, judged by message by the column's own evaluator
+        # (`error-plane-check.nix`). A DECLARER only — the same cell-level antecedent as the
+        # `ci-error` hook below — because the check builds its evaluator family's engine, and a
+        # repository that declares no plane fetches none.
+        planeDeclared = lib.any (s: s != { }) (lib.attrValues testsError);
+        errorPlane = import ./error-plane-check.nix {
+          inherit
+            pkgs
+            lib
+            name
+            inputs
+            genInputs
+            system
+            ;
+          root = inputs.self.sourceInfo.outPath;
+        };
       in
       {
         # Pre-commit hooks: format check + unit tests
@@ -542,6 +560,7 @@ in
           echo "${toString (builtins.length (lib.flatten assertTests))} tests passed"
           touch $out
         '';
+        checks.tests-error = lib.mkIf planeDeclared errorPlane.tests-error;
 
         devshells.default = {
           # The installer's LAST ACT writes `core.hooksPath` RELATIVE to the working-tree top-level

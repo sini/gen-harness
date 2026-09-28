@@ -63,8 +63,9 @@ set) and every published name, a path through plain namespaces with `_type`-tagg
 derivations and functions as leaves, must evaluate. A repository with no root entry declares
 `{ gen.ci.rootSurface.entry = "not-owed"; }`. A top-level tombstone is declared with its exact
 message, `gen.ci.rootSurface.retired.<name> = "<message>";`, which also generates the error-plane
-cell `testsError.root-surface-retired.test-retired-<name>` pinning that message, and so is refused
-where `ci/tests-error.nix` is absent. The green is a statement about the library at its own
+cell `testsError.root-surface-retired.test-retired-<name>` pinning that message, with the root's
+dependencies taken from `./ci`'s inputs through its `src` seam so the cell never fetches, and so is
+refused where `ci/tests-error.nix` is absent. The green is a statement about the library at its own
 declared point only (`root-surface.nix` states the scope), and the walk has no depth bound: a
 cyclic namespace reds with `max-call-depth exceeded`.
 
@@ -139,10 +140,14 @@ jobs:
 
 Each of the three columns installs its own evaluator at a pinned version and runs the caller's
 `nix flake check` lines, evaluates the ci devShell (Determinate's `flake check` does not force it),
-and, where `ci/tests-error.nix` exists, runs the error plane through `ci --tests-error`. That
-devshell argument evaluates every `testsError` cell with the `nix` on `PATH`, one process per cell,
-because nix-unit is linked against one upstream nix-expr whatever evaluator is installed. The `nix`
-column also keeps the nix-unit step, which alone checks `expectedError.type`. Where
+and, for a repository that declares an error plane, `checks.tests-error` inside that flake check:
+it builds the column's own evaluator release from the harness's engine input and evaluates every
+`testsError` cell with it in the build sandbox, one process per cell, because nix-unit is linked
+against one upstream nix-expr whatever evaluator is installed. The column's `evaluator identity`
+step refuses a run whose `nix` is not that engine's store path. The check evaluates `ci/flake.lock`
+as written, so an in-memory `--override-input` of a ci input is refused by name: write the lock to
+test a harness change against a consumer. The `nix` column also keeps the nix-unit step, which alone
+checks `expectedError.type`. Where
 `ci/tests-process.nix` exists, the process plane runs through `ci --tests-process`: the consumer's
 `apps.<system>.tests-process` program, run outside the sandbox so its cells call the column's
 `nix-instantiate`, and refused if its closure carries an evaluator (`process-plane.nix`). Formatting

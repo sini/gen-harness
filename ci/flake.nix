@@ -31,6 +31,13 @@
     # gains a gen-prelude node, and no consumer can end up with two builds of it.
     gen-prelude.url = "github:sini/gen-prelude";
 
+    # The error plane's three ENGINES (`error-plane-engines.nix`), each at the release `evaluators.yml`
+    # pins for its column and with no `follows`, so the out path is the one the column installs.
+    # `ci/tests/engine-pins.nix` holds each equal to its pin.
+    nix-upstream.url = "github:NixOS/nix/2.35.2";
+    nix-determinate.url = "github:DeterminateSystems/nix-src/v3.22.5";
+    nix-lix.url = "https://git.lix.systems/lix-project/lix/archive/2.95.3.tar.gz";
+
     # gen-dispatch and gen-select, for the dispatch-select-adapter suite: a cross-library
     # integration suite's subject is a PAIRING, and this is that pairing's home (see README —
     # neither sibling becomes the other's declared dependency for it). Pinned directly here rather

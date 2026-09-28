@@ -70,7 +70,10 @@ in
         "flake-root"
         "git-hooks-nix"
         "import-tree"
+        "nix-determinate"
+        "nix-lix"
         "nix-unit"
+        "nix-upstream"
         "nixpkgs"
         "treefmt-nix"
       ];
