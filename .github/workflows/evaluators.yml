@@ -190,12 +190,14 @@ jobs:
           [ -z "${NIX_PATH:-}" ] || { echo "::error::NIX_PATH is set: $NIX_PATH"; rc=1; }
           # The error plane is DECLARED BY ITS CELLS: mkCi's `errorPlane.declared`, the predicate
           # `checks.tests-error` exists on, never a file name (den-hoag-o7kjc). One evaluation reads
-          # it and a declarer's engine; a ci flake that is not mkCi's publishes no `errorPlane`, has
-          # no harness error plane, and says so. A failed evaluation fails this step.
+          # it and a declarer's engine; a ci flake that is not mkCi's publishes neither `errorPlane`
+          # nor `testsError`, has no harness error plane, and says so. One with `testsError` and no
+          # `errorPlane` is mkCi at a harness older than the output: its declaration is UNKNOWN, never
+          # "none", and it fails here. A failed evaluation fails this step.
           # A declarer's engine must be the binary this column runs: the same store path, not the
           # same family or version. The `${…}` is Nix's interpolation, not the shell's.
           # shellcheck disable=SC2016
-          plane=$(nix eval --raw "./ci#." --apply 'o: if !(o ? errorPlane) then "no-output" else if o.errorPlane.declared then "${o.errorPlane.engine.x86_64-linux}" else "undeclared"')
+          plane=$(nix eval --raw "./ci#." --apply 'o: if !(o ? errorPlane) then (if o ? testsError then "unknown" else "no-output") else if o.errorPlane.declared then "${o.errorPlane.engine.x86_64-linux}" else "undeclared"')
           case "$plane" in
             /nix/store/*)
               echo "error_plane=declared" >> "$GITHUB_OUTPUT"
@@ -204,7 +206,8 @@ jobs:
               [ "$plane" = "$running" ] || { echo "::error::the ${{ matrix.evaluator }} column's error-plane engine $plane is not its evaluator $running"; rc=1; }
               ;;
             undeclared) echo "error plane: not declared (errorPlane.declared = false)" ;;
-            no-output) echo "error plane: none (./ci publishes no errorPlane output; it is not an mkCi flake)" ;;
+            no-output) echo "error plane: none (./ci publishes neither errorPlane nor testsError; it is not an mkCi flake)" ;;
+            unknown) echo "::error::error plane: UNKNOWN — ./ci publishes testsError but no errorPlane, so its gen-harness predates the declaration output and this column cannot assert its engine. Relock ./ci onto the harness this workflow is called at"; rc=1 ;;
             *) echo "::error::error plane: unreadable declaration '$plane'"; rc=1 ;;
           esac
           exit "$rc"

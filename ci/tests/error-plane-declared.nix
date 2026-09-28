@@ -64,6 +64,12 @@ in
       expr = apply { };
       expected = "no-output";
     };
+    # An mkCi flake at a harness older than the output: `testsError` and no `errorPlane`. Its
+    # declaration is unknown, never "none" (den-hoag-o7kjc landing gate P1).
+    test-a-stale-harness-consumer-is-unknown-not-none = {
+      expr = apply { testsError.suite.test-one = { }; };
+      expected = "unknown";
+    };
     # The published output is the predicate itself, not a copy of it.
     test-the-published-declaration-is-the-predicate = {
       expr = map (d: (outputsOf d).errorPlane.declared) [

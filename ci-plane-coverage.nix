@@ -25,8 +25,11 @@
 # `ci/tests-error.nix`, so the file read it as a non-declarer. Never a lexical mention: two declarers
 # never spell `testsError` in their own text (mkCi produces the output for them).
 # ★ THE FILE STAYS A CLAIM, NOT A DECLARATION. A `ci/tests-error.nix` that declares nothing is an
-# orphan — its cells are wired nowhere — and `plane-non-vacuous` refuses it beside the declared plane
-# that collects 0 cells, so moving the predicate off the file loses no refusal.
+# orphan — its cells are wired nowhere — and `plane-non-vacuous` refuses it WHEN THE WHOLE PLANE
+# COLLECTS 0 CELLS, beside the declared plane that collects 0. An orphan file beside a plane with cells
+# elsewhere (gen-prelude's suite files) is NOT seen: the unit is collected cells, and no cell of the
+# file can be told from the rest. The file predicate gave the same green there, so moving the
+# predicate off the file loses no refusal.
 #
 # ★ RUNS IS LEXICAL, AND NO YAML IS PARSED. Four conditions on a single line, each named where it
 # stands in `runsLine`. Both measured instances of the defect are NO STEP AT ALL, which condition 3
