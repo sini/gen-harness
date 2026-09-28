@@ -213,11 +213,13 @@ let
   zeroInputFlake = "{ outputs = _: { }; }";
 
   # ★ EVERY FIXTURE CARRIES A `ci/flake.nix`, because every mkCi member does and a fixture without
-  # one encodes a state no member can be in. It also makes the ONE guard that matters visible: the
-  # post-bump catch-up at the foot of `relock` is gated on a node having moved AND on a ci flake
-  # existing, and while no fixture had the second, the first could be deleted outright with every
-  # arm here still green. Never evaluated by any arm — `relock` reads `ci/flake.lock`, and the one
-  # `nix eval --file` it does is over the ROOT flake.
+  # one encodes a state no member can be in — WITH ONE NAMED EXCEPTION (`neither-flake`, below,
+  # `hasCiFlake = false`): den-hoag-qxve8's refusal-by-name arm needs exactly the state no member is
+  # in, on purpose, to prove the discrimination still refuses it. It also makes the ONE guard that
+  # matters visible on every OTHER fixture: the post-bump catch-up at the foot of `relock` is gated
+  # on a node having moved AND on a ci flake existing, and while no fixture had the second, the
+  # first could be deleted outright with every arm here still green. Never evaluated by any arm —
+  # `relock` reads `ci/flake.lock`, and the one `nix eval --file` it does is over the ROOT flake.
   ciFlake = "{ outputs = _: { }; }";
   declaredFlake = ''
     {
@@ -236,6 +238,11 @@ let
   #                   arm stays hermetic.
   # `declared-unlocked`  NO root lock and a flake that DOES declare — the anomaly, refused.
   # `follows-root`    `two-act` plus a root input that FOLLOWS another's input.
+  # `no-root-flake`   NO root flake.nix AT ALL (not merely zero-input) plus a `./ci` — den-hoag-qxve8,
+  #                   den-ag-design's own shape. Reaches the same ci-only act as `zero-input`, by
+  #                   the same message, and carries no ci lock either for the same hermetic reason.
+  # `neither-flake`   NO root flake.nix and NO `ci/flake.nix` — the discriminating partner of
+  #                   `no-root-flake`, refused by name rather than folded into its act.
   fixtures = {
     two-act = {
       rootLock = declaredRootLock;
@@ -256,6 +263,21 @@ let
       rootLock = null;
       ciLock = null;
       flake = zeroInputFlake;
+    };
+    # den-hoag-qxve8. NO root flake.nix at all — `flake = null` skips writing it, rather than
+    # writing the zero-input text — with a `ci/flake.nix` present exactly as every OTHER fixture
+    # carries one. No ci lock, for the same hermetic reason `zero-input` has none.
+    no-root-flake = {
+      rootLock = null;
+      ciLock = null;
+      flake = null;
+    };
+    # The discriminating partner: NEITHER flake exists. The one fixture that omits `ci/flake.nix`.
+    neither-flake = {
+      rootLock = null;
+      ciLock = null;
+      flake = null;
+      hasCiFlake = false;
     };
     declared-unlocked = {
       rootLock = null;
@@ -402,6 +424,40 @@ let
       forbids = [
         "nothing to relock"
         "REFUSED"
+      ];
+      locks = "unchanged";
+      noRootLockCreated = true;
+    }
+    {
+      # ★ den-hoag-qxve8. The EXTENDED shape of defect 2: a root with NO flake.nix at all is the
+      # same "nothing to relock at the root" state a zero-input root reaches by evaluating and
+      # finding `[]` — den-ag-design is built exactly this way, and before the fix this fixture
+      # refused rc=2 "not a flake repository" before ever reading `ci/`. The message asserted here
+      # is IDENTICAL to the arm above's: both reach the same later branch, discriminated on
+      # `rootLocked` alone, never on whether a flake.nix was read.
+      label = "no-root-flake-nix-and-a-ci-directory-is-the-ci-only-act";
+      fixture = "no-root-flake";
+      args = [ ];
+      rc = 0;
+      wants = [ "no root inputs declared and no root lock; ci/ only" ];
+      forbids = [
+        "not a flake repository"
+        "REFUSED"
+      ];
+      locks = "unchanged";
+      noRootLockCreated = true;
+    }
+    {
+      # The discriminating partner: NEITHER a root flake.nix nor a `ci/flake.nix` is refused by
+      # name, never folded into the ci-only act above.
+      label = "no-root-flake-and-no-ci-flake-refuses-by-name";
+      fixture = "neither-flake";
+      args = [ ];
+      rc = 2;
+      wants = [ "not a flake repository" ];
+      forbids = [
+        "ci/ only"
+        "bumping every declared input"
       ];
       locks = "unchanged";
       noRootLockCreated = true;
@@ -658,12 +714,16 @@ let
     ''
       rm -rf "$TMP/fix"
       mkdir -p "$TMP/fix/ci"
-      cat > "$TMP/fix/flake.nix" <<'FIXTURE_FLAKE'
-      ${f.flake}
-      FIXTURE_FLAKE
-      cat > "$TMP/fix/ci/flake.nix" <<'FIXTURE_CI_FLAKE'
-      ${ciFlake}
-      FIXTURE_CI_FLAKE
+      ${lib.optionalString (f.flake != null) ''
+        cat > "$TMP/fix/flake.nix" <<'FIXTURE_FLAKE'
+        ${f.flake}
+        FIXTURE_FLAKE
+      ''}
+      ${lib.optionalString (f.hasCiFlake or true) ''
+        cat > "$TMP/fix/ci/flake.nix" <<'FIXTURE_CI_FLAKE'
+        ${ciFlake}
+        FIXTURE_CI_FLAKE
+      ''}
       ${lib.optionalString (f.rootLock != null) ''
         cat > "$TMP/fix/flake.lock" <<'FIXTURE_ROOT_LOCK'
         ${f.rootLock}

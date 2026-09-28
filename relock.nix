@@ -132,7 +132,15 @@ pkgs.writeShellApplication {
     # are all of that shape, and they are the leaves everything else depends on — so refusing them
     # refused exactly the members that best match the architecture this command serves.
     #
-    # DECLARED-BUT-UNLOCKED IS A DIFFERENT STATE AND IS REFUSED, never folded into the one above.
+    # ★ AN ABSENT ROOT flake.nix IS THE SAME SHAPE, ONE STEP FURTHER: it declares nothing to relock
+    # at the root exactly as a flake.nix declaring zero inputs does, and den-ag-design carries no
+    # root flake.nix at all, by design (`den-hoag-qxve8`). There is no flake.nix there to read
+    # declared inputs FROM, so this skips that read entirely rather than asking `nix eval` to read a
+    # file that does not exist, and falls out of this block with `rootLocked` still "no" — the same
+    # state the zero-input case below reaches by evaluating and finding `[]`. It is discriminated
+    # from "neither a root flake.nix nor a ./ci one", which is refused by name exactly as before.
+    #
+    # DECLARED-BUT-UNLOCKED IS A DIFFERENT STATE AND IS REFUSED, never folded into either above.
     # Such a repository has never been locked at all, and writing its FIRST lock is not a relock:
     # it is a larger act than this command takes on its own authority, and `nix flake lock` is the
     # one line that takes it deliberately. Folding the two together would silently ci-only a member
@@ -142,29 +150,36 @@ pkgs.writeShellApplication {
     if [ ! -f "$rootLock" ]; then
       rootLocked=no
       if [ ! -f "$root/flake.nix" ]; then
-        printf '%s: no flake.nix and no flake.lock at %s — not a flake repository.\n' "$self" "$root" >&2
-        exit 2
-      fi
-      # Read from the FILE, because with no lock there is nothing else to read it from. This is the
-      # one place the lock is not the statement of the declared set — and `outputs` is never forced,
-      # so no input is fetched and nothing is evaluated beyond the attribute names.
-      rc=0
-      rootInputs=$(nix eval --json --file "$root/flake.nix" \
-        --apply 'f: builtins.attrNames (f.inputs or { })') || rc=$?
-      if [ "$rc" -ne 0 ]; then
-        printf '%s: CONTROL FAILED — could not read the declared inputs of %s/flake.nix.\n' \
-          "$self" "$root" >&2
-        exit 2
-      fi
-      if [ "$rootInputs" != "[]" ]; then
-        printf '%s\n' \
-          "$self: REFUSED, and nothing was written. $root/flake.nix DECLARES inputs but carries no" \
-          "flake.lock:" \
-          "  $(printf '%s' "$rootInputs" | jq -r 'join(" ")')" \
-          "A flake with zero inputs legitimately has no lock and this command relocks its ci/ alone;" \
-          "a flake with inputs and no lock has never been locked, and writing its first lock is not" \
-          "a relock. Run: nix flake lock" >&2
-        exit 1
+        if [ ! -f "$ciDir/flake.nix" ]; then
+          printf '%s\n' \
+            "$self: no flake.nix and no flake.lock at $root, and no $ciDir/flake.nix either —" \
+            "not a flake repository." >&2
+          exit 2
+        fi
+        # Nothing to read and nothing to write at the root: fall through with rootLocked=no, as the
+        # zero-input case below does after reading its flake.nix and finding no inputs declared.
+      else
+        # Read from the FILE, because with no lock there is nothing else to read it from. This is
+        # the one place the lock is not the statement of the declared set — and `outputs` is never
+        # forced, so no input is fetched and nothing is evaluated beyond the attribute names.
+        rc=0
+        rootInputs=$(nix eval --json --file "$root/flake.nix" \
+          --apply 'f: builtins.attrNames (f.inputs or { })') || rc=$?
+        if [ "$rc" -ne 0 ]; then
+          printf '%s: CONTROL FAILED — could not read the declared inputs of %s/flake.nix.\n' \
+            "$self" "$root" >&2
+          exit 2
+        fi
+        if [ "$rootInputs" != "[]" ]; then
+          printf '%s\n' \
+            "$self: REFUSED, and nothing was written. $root/flake.nix DECLARES inputs but carries no" \
+            "flake.lock:" \
+            "  $(printf '%s' "$rootInputs" | jq -r 'join(" ")')" \
+            "A flake with zero inputs legitimately has no lock and this command relocks its ci/ alone;" \
+            "a flake with inputs and no lock has never been locked, and writing its first lock is not" \
+            "a relock. Run: nix flake lock" >&2
+          exit 1
+        fi
       fi
     fi
 
