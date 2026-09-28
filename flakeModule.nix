@@ -403,6 +403,13 @@ in
         };
       in
       {
+        # `checks.tests-error` for a DECLARER, and NO SUCH NAME for anyone else. `checks` is
+        # `lazyAttrsOf`, so `checks.tests-error = mkIf false …` keeps the NAME with no value, and
+        # `nix flake check` forcing it refuses every non-declarer ("accessed but has no value
+        # defined"). A conditional import adds the definition or nothing; the condition reads the
+        # flake-level `testsError`, never this module's own arguments, so it cannot recurse.
+        imports = lib.optional planeDeclared { checks.tests-error = errorPlane.tests-error; };
+
         # Pre-commit hooks: format check + unit tests
         pre-commit = {
           check.enable = false;
@@ -560,7 +567,6 @@ in
           echo "${toString (builtins.length (lib.flatten assertTests))} tests passed"
           touch $out
         '';
-        checks.tests-error = lib.mkIf planeDeclared errorPlane.tests-error;
 
         devshells.default = {
           # The installer's LAST ACT writes `core.hooksPath` RELATIVE to the working-tree top-level
