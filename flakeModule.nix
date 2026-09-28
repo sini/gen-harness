@@ -580,8 +580,16 @@ in
           # that disappears without saying so is the defect class this line exists to close.
           # The `if` form rather than `|| true`: the removal's exit status is the condition, so it is
           # read rather than discarded, and it is safe under `set -e`.
+          #
+          # THE INSTALLER WRITES TO STDERR, never stdout: on a checkout's first entry it prints the
+          # config path and `pre-commit installed at …`, and `nix develop --command X > f` would capture
+          # them as X's output. A CI runner is always a first entry, so the process plane's
+          # `--userns-binaries > file` step read the config path as a binary and refused it
+          # (den-hoag-o7kjc F1).
           devshell.startup.git-hooks.text = ''
-            ${config.pre-commit.installationScript}
+            {
+              ${config.pre-commit.installationScript}
+            } 1>&2
             if ${lib.getExe config.pre-commit.settings.gitPackage} config --local --unset-all core.hooksPath; then
               echo 1>&2 "gen-harness: removed core.hooksPath - git's default already resolves hooks to the common dir, and the relative value the installer writes is unreachable from a linked worktree."
             fi
