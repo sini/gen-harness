@@ -149,8 +149,11 @@ jobs:
           echo /nix/var/nix/profiles/default/bin >> "$GITHUB_PATH"
 
       # No cache step in any column (den-hoag-uer2v). magic-nix-cache's Post step re-uploads what the
-      # same job just downloaded, serially, and on identical code its duration swings from 1 s to 300 s.
-      # It left the determinate column first (OQ1 arm (b)), then nix and lix.
+      # same job just downloaded, serially, and on identical code its duration swings from 1 s to 300 s:
+      # 59.0 of the nix column's 101.9 job-minutes in relock 37's first pass. It left the determinate
+      # column first (OQ1 arm (b)), then nix and lix, priced live against a fresh-rev control: both
+      # columns' mean job fell in both priced repositories, and what the cache had substituted
+      # (chiefly nix-unit 2.35.1, compiled in the devShell) costs about what its Run step did.
 
       - name: evaluator identity
         run: |
