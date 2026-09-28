@@ -33,8 +33,7 @@
 }:
 let
   ev = import ./error-plane-engines.nix { inherit lib genInputs system; };
-  inherit (ev) family;
-  engine = ev.engines.${family};
+  inherit (ev) family engine;
 
   lock = builtins.fromJSON (builtins.readFile "${root}/ci/flake.lock");
   rootEdges = lock.nodes.${lock.root}.inputs or { };

@@ -77,9 +77,6 @@ let
       conf = "experimental-features = nix-command flakes\n";
     };
   };
-in
-{
-  inherit engines evalConf;
   family =
     if lib.hasSuffix "-lix" builtins.nixVersion then
       "lix"
@@ -87,6 +84,12 @@ in
       "determinate"
     else
       "nix";
+in
+{
+  inherit engines evalConf family;
+  # The engine of the family evaluating this expression: what `checks.tests-error` runs and what the
+  # flake module publishes as `errorPlane.engine`, one binding for both.
+  engine = engines.${family};
   # The input names the engines come from: the error plane never re-pins beneath them.
   inputNames = [
     "nix-upstream"

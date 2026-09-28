@@ -1,9 +1,9 @@
 # Oracle for the CI-PLANE COVERAGE invariant: a repository that DECLARES an error plane RUNS it,
 # and cannot satisfy that by deleting the plane.
 #
-# INVARIANT. If `ci/tests-error.nix` exists, some workflow step invokes `testsError` — AND if some
-# workflow step invokes `testsError`, `ci/tests-error.nix` exists. Both directions, because the
-# implication alone is satisfied vacuously by deleting the plane file while its step lives on: the
+# INVARIANT. If an error plane is declared, some workflow step invokes `testsError` — AND if some
+# workflow step invokes `testsError`, an error plane is declared. Both directions, because the
+# implication alone is satisfied vacuously by deleting the plane while its step lives on: the
 # repository silently stops being a declarer and reads green.
 #
 # WHY. `nix flake check` covers `flake.tests` only; the error plane is a second output that runs
@@ -19,9 +19,14 @@
 # The classifier and its arming still read every state below; `plane-non-vacuous`, `reader-live`,
 # `caller-ref-is-locked-harness` and `every-workflow-calls-evaluators` still gate.
 #
-# ★ DECLARES IS THE FILE — never the flake output and never a lexical mention. Two declarers carry
-# the plane and never spell `testsError` in their own text (mkCi produces the output for them), and
-# the output is unreachable from every vantage but the flake's own.
+# ★ DECLARES IS THE CELLS — `error-plane-declared.nix` over the flake's own evaluated `testsError`,
+# the one predicate `checks.tests-error`, `errorPlane.declared` and `evaluators.yml` all read
+# (den-hoag-o7kjc). Never a file name: gen-prelude declares cells from its suite files and has no
+# `ci/tests-error.nix`, so the file read it as a non-declarer. Never a lexical mention: two declarers
+# never spell `testsError` in their own text (mkCi produces the output for them).
+# ★ THE FILE STAYS A CLAIM, NOT A DECLARATION. A `ci/tests-error.nix` that declares nothing is an
+# orphan — its cells are wired nowhere — and `plane-non-vacuous` refuses it beside the declared plane
+# that collects 0 cells, so moving the predicate off the file loses no refusal.
 #
 # ★ RUNS IS LEXICAL, AND NO YAML IS PARSED. Four conditions on a single line, each named where it
 # stands in `runsLine`. Both measured instances of the defect are NO STEP AT ALL, which condition 3
@@ -55,7 +60,8 @@
   # `readroots.nix` state the same ground.
   root,
   # The flake's own evaluated error plane, `config.flake.testsError`: the sibling output, read from
-  # inside the flake that defines it. The one input the reader cannot produce from text.
+  # inside the flake that defines it. The one input the reader cannot produce from text, and the
+  # subject of the declaration predicate.
   testsError,
   # The revision of the gen-harness this check was built FROM — `genInputs.self.sourceInfo.rev`,
   # handed in by `flakeModule.nix`. A caller's `evaluators.yml@<sha>` must equal it, or the run mixes
@@ -105,9 +111,9 @@ let
     ) tokens;
 
   # ── CALLS: the reusable three-evaluator workflow (den-hoag-lbtnv), a second RUNS predicate ──
-  # A job-level `uses:` of gen-harness's `evaluators.yml` runs the error plane on the same file
-  # predicate this check declares by (`hashFiles('ci/tests-error.nix')`), so for a DECLARER it counts
-  # as running it. For a NON-declarer it does not count as `runs-undeclared`: the call is conditional
+  # A job-level `uses:` of gen-harness's `evaluators.yml` runs the error plane on the same
+  # predicate this check declares by (`errorPlane.declared`), so for a DECLARER it counts as running
+  # it. For a NON-declarer it does not count as `runs-undeclared`: the call is conditional
   # and runs nothing there. Lexical, like `runsLine`: the value is the whole `uses:` scalar, quotes
   # and a trailing comment stripped. The LOCAL form counts only in a tree that itself carries
   # `evaluators.yml` — gen-harness — because anywhere else it names a file that is not there.
@@ -182,10 +188,15 @@ let
     builtins.filter (c: c.remote && (rev == null || c.ref != rev || definesEvaluators f)) (callsOf f);
 
   # ── READER: the only half that touches the filesystem ──
-  # facts = { name, hasWfDir, wfFiles = [ { file, text } ], planeText | null }. Files are kept
+  # facts = { name, hasWfDir, wfFiles = [ { file, text } ], declares, planeFile }. Files are kept
   # SEPARATE, never joined: a witness names `file:line`, and a file exists only if nothing joined it.
+  # `declares` is the predicate over the tree's own evaluated `testsError`, which no text carries.
   readOf =
-    { name, src }:
+    {
+      name,
+      src,
+      testsError,
+    }:
     let
       wfDir = "${src}/.github/workflows";
       hasWfDir = builtins.pathExists wfDir;
@@ -196,7 +207,6 @@ let
           )
         )
       );
-      planePath = "${src}/ci/tests-error.nix";
     in
     {
       inherit name hasWfDir;
@@ -204,7 +214,8 @@ let
         file = ".github/workflows/${f}";
         text = builtins.readFile "${wfDir}/${f}";
       }) wfNames;
-      planeText = if builtins.pathExists planePath then builtins.readFile planePath else null;
+      declares = import ./error-plane-declared.nix testsError;
+      planeFile = builtins.pathExists "${src}/ci/tests-error.nix";
     };
 
   # ── CLASSIFIER: total over a facts record, no path access ──
@@ -220,7 +231,7 @@ let
   classify =
     f:
     let
-      declares = f.planeText != null;
+      inherit (f) declares;
       lines = lib.concatMap (
         w:
         lib.imap1 (line: text: {
@@ -256,7 +267,7 @@ let
         ;
       # Root-relative, both halves, so a reader checks the row against the tree by `file:line`.
       witness = {
-        plane = if declares then "ci/tests-error.nix" else null;
+        plane = if declares then "flake.testsError" else null;
         runs =
           if invoked then
             builtins.head hits
@@ -284,9 +295,11 @@ let
     ) 0 (builtins.attrNames set);
 
   refusesNonCaller = f: f.hasWfDir && !(classify f).called;
+  # `plane-non-vacuous`'s predicate: a declared plane, or a plane FILE, that collects 0 cells.
+  vacuous = f: cells: (f.declares || f.planeFile) && cells == 0;
 
   liveFacts = readOf {
-    inherit name;
+    inherit name testsError;
     src = root;
   };
   live = classify liveFacts;
@@ -295,7 +308,6 @@ let
 
   # ── ARMING: synthetic facts records, built here, disjoint from every live reading ──
   # Each row reads its own seed and nothing live. Editing a seed reds the gate.
-  seedPlane = "{ flake.testsError.suite.testOne = { expr = 1; expected = 1; }; }\n";
   seedWf = withStep: {
     file = ".github/workflows/ci.yml";
     text =
@@ -312,50 +324,50 @@ let
       name = "seed-runs";
       hasWfDir = true;
       wfFiles = [ (seedWf true) ];
-      planeText = seedPlane;
+      declares = true;
     };
     unrun = {
       name = "seed-unrun";
       hasWfDir = true;
       wfFiles = [ (seedWf false) ];
-      planeText = seedPlane;
+      declares = true;
     };
     nowf = {
       name = "seed-nowf";
       hasWfDir = false;
       wfFiles = [ ];
-      planeText = seedPlane;
+      declares = true;
     };
     noplane = {
       name = "seed-noplane";
       hasWfDir = true;
       wfFiles = [ (seedWf false) ];
-      planeText = null;
+      declares = false;
     };
     nowf-noplane = {
       name = "seed-nowf-noplane";
       hasWfDir = false;
       wfFiles = [ ];
-      planeText = null;
+      declares = false;
     };
     # The CALLER shapes. `armRev` stands for the locked harness; no real revision is written here.
     caller = {
       name = "seed-caller";
       hasWfDir = true;
       wfFiles = [ (seedCaller armRev) ];
-      planeText = seedPlane;
+      declares = true;
     };
     caller-noplane = {
       name = "seed-caller-noplane";
       hasWfDir = true;
       wfFiles = [ (seedCaller armRev) ];
-      planeText = null;
+      declares = false;
     };
     caller-skew = {
       name = "seed-caller-skew";
       hasWfDir = true;
       wfFiles = [ (seedCaller (builtins.replaceStrings [ "0" ] [ "f" ] armRev)) ];
-      planeText = seedPlane;
+      declares = true;
     };
     # A tree that DEFINES the workflow and calls a published copy of it at the very rev it is
     # locked to: refused anyway, because the rev being right does not make it one identity.
@@ -369,14 +381,14 @@ let
           text = "on:\n  workflow_call: {}\n";
         }
       ];
-      planeText = seedPlane;
+      declares = true;
     };
     # The obt1y cell: the step stays, the plane file is gone.
     runs-undeclared = {
       name = "seed-runs-undeclared";
       hasWfDir = true;
       wfFiles = [ (seedWf true) ];
-      planeText = null;
+      declares = false;
     };
   };
   arm = builtins.mapAttrs (_: classify) seeds;
@@ -406,7 +418,7 @@ let
 
   gate = {
     # With the `declares` antecedent: a non-declarer has `testsError = { }` and did nothing wrong.
-    plane-non-vacuous = !live.declares || liveCells > 0;
+    plane-non-vacuous = !vacuous liveFacts liveCells;
     # The universal positive control: the one file whose absence is impossible if this check is
     # evaluating from that flake at all. A blind reader, or a root one directory off, reds here.
     reader-live = builtins.pathExists "${root}/ci/flake.nix";
@@ -427,6 +439,25 @@ let
     arming-nowf-noplane = arm.nowf-noplane.state == "no-workflow-dir";
     arming-runs-undeclared = arm.runs-undeclared.state == "runs-undeclared";
     arming-empty-plane = leafCount armPlaneEmpty == 0 && leafCount armPlaneReal == 3;
+    # RED: declared with 0 cells, and a plane file declaring nothing. GREEN: a declarer with cells.
+    # CONTROL: neither a declaration nor a file.
+    arming-vacuous =
+      vacuous {
+        declares = true;
+        planeFile = false;
+      } 0
+      && vacuous {
+        declares = false;
+        planeFile = true;
+      } 0
+      && !vacuous {
+        declares = true;
+        planeFile = true;
+      } 1
+      && !vacuous {
+        declares = false;
+        planeFile = false;
+      } 0;
     # A caller is `runs` for a declarer and `no-plane` for a non-declarer — never runs-undeclared.
     arming-caller = arm.caller.state == "runs" && arm.caller.witness.runs.line == 3;
     arming-caller-noplane = arm.caller-noplane.state == "no-plane";
@@ -448,7 +479,7 @@ let
   allOk = failed == [ ];
 
   repair = {
-    plane-non-vacuous = "ci/tests-error.nix is declared and the evaluated testsError holds 0 test-prefixed leaves: nix-unit would report 0/0 and exit 0, the false pass. Give the plane a cell or retire the file.";
+    plane-non-vacuous = "an error plane is declared (testsError holds a non-empty suite) or ci/tests-error.nix exists, and the evaluated testsError holds 0 test-prefixed leaves: nix-unit would report 0/0 and exit 0, the false pass, and a plane file declaring nothing is wired nowhere. Give the plane a cell, or retire the suite and the file.";
     reader-live = "the reader cannot see ci/flake.nix under its root: the check is bound to the wrong tree. `root` must be inputs.self.sourceInfo.outPath.";
     every-workflow-calls-evaluators = "this repository has .github/workflows and no job calls gen-harness's evaluators.yml, so its CI does not run under upstream Nix, Determinate and Lix. Replace the `run:` job with `jobs.ci.uses: sini/gen-harness/.github/workflows/evaluators.yml@<the gen-harness rev in ci/flake.lock>` (write any 40-hex sha, then `relock` rewrites it), or remove the workflow directory.";
     caller-ref-is-locked-harness = "a `uses: sini/gen-harness/.github/workflows/evaluators.yml@<sha>` line names a revision other than the gen-harness this ci is locked to (${toString harnessRev}), or this tree defines evaluators.yml itself and calls a published copy. Run `relock`, which rewrites the sha to the locked rev; gen-harness calls its own workflow locally (`uses: ./.github/workflows/evaluators.yml`).";

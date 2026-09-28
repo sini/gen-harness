@@ -20,6 +20,9 @@ in
 let
   tests = config.flake.tests;
   testsError = config.flake.testsError;
+  # The error-plane declaration: the cells, from the one predicate every reader takes
+  # (`error-plane-declared.nix`). Flake-level, so the conditional import below cannot recurse.
+  planeDeclared = import ./error-plane-declared.nix testsError;
 
   # The base mdformat plugin set, from the one file that states which plugins are members.
   # What each member defends, and why beautysh is not one, are documented there beside the
@@ -158,8 +161,8 @@ in
       Top-level tombstones: `<name> = <the EXACT message its throw carries>`. Each name is excluded
       from the walk, refused if absent or no longer throwing, and pinned to its message by one
       generated `flake.testsError.root-surface-retired.test-retired-<name>` cell forced at the root
-      seam, with its dependencies from `./ci`'s inputs. Refused where `ci/tests-error.nix` is absent,
-      since no CI step would run that cell.
+      seam, with its dependencies from `./ci`'s inputs. That cell declares the error plane, so
+      `checks.tests-error` runs it in every column.
     '';
   };
 
@@ -167,7 +170,7 @@ in
     systems = lib.systems.flakeExposed;
 
     # One error-plane cell per declared tombstone (`root-surface.nix`, `retiredCells`). Only a
-    # declarer gets the suite, and the check refuses a declarer with no plane file to run it.
+    # declarer of tombstones gets the suite, and the suite is itself a declaration of the plane.
     flake.testsError = lib.mkIf (rsRetired != { }) {
       root-surface-retired = rootSurface.retiredCells {
         inherit lib inputs;
@@ -187,6 +190,21 @@ in
     flake.testSingletons = lib.mapAttrs (
       _suite: subtests: lib.mapAttrs (tn: t: { ${tn} = t; }) subtests
     ) config.flake.tests;
+
+    # ★ THE ERROR-PLANE DECLARATION, PUBLISHED, so a reader outside this evaluation takes the same
+    # predicate `checks.tests-error` exists on rather than probing for a file (den-hoag-o7kjc).
+    # `evaluators.yml`'s `evaluator identity` reads `declared` and a declarer's `engine` in ONE
+    # evaluation, and gates the nix-unit step on it; relock-all's local gate reads it for that step.
+    # `engine.<system>` is the binary `checks.tests-error` runs, for the family evaluating this flake,
+    # and it is ABSENT for a non-declarer, whose evaluation never selects an engine.
+    flake.errorPlane = {
+      declared = planeDeclared;
+    }
+    // lib.optionalAttrs planeDeclared {
+      engine = lib.genAttrs config.systems (
+        system: (import ./error-plane-engines.nix { inherit lib genInputs system; }).engine.pkg
+      );
+    };
 
     perSystem =
       {
@@ -386,10 +404,9 @@ in
         processPlaneCmd = import ./process-plane.nix { inherit pkgs name; };
 
         # The error plane as CHECKS, judged by message by the column's own evaluator
-        # (`error-plane-check.nix`). A DECLARER only — the same cell-level antecedent as the
-        # `ci-error` hook below — because the check builds its evaluator family's engine, and a
-        # repository that declares no plane fetches none.
-        planeDeclared = lib.any (s: s != { }) (lib.attrValues testsError);
+        # (`error-plane-check.nix`). A DECLARER only — `planeDeclared`, the flake-level predicate,
+        # which the `ci-error` hook below also keys on — because the check builds its evaluator
+        # family's engine, and a repository that declares no plane fetches none.
         errorPlane = import ./error-plane-check.nix {
           inherit
             pkgs
@@ -433,8 +450,9 @@ in
               # `🎉 0/0 successful` at rc=0: the standing false pass, which is the same defect one
               # layer out from the one the guard above removes. `lib.all` is wrong at BOTH ends —
               # vacuously true over no suites, and false for an empty suite sitting beside a
-              # populated one, which would disable a live plane.
-              enable = lib.any (s: s != { }) (lib.attrValues testsError);
+              # populated one, which would disable a live plane. `error-plane-declared.nix` is that
+              # predicate, stated once.
+              enable = planeDeclared;
               name = "ci-error";
               description = "Run nix-unit error-assertion tests";
               entry = "${ciNixUnitError}/bin/${name}-ci-nix-unit-error";
@@ -527,9 +545,9 @@ in
           sheet = sheetDeclared;
         };
 
-        # A repository that DECLARES an error plane (`ci/tests-error.nix`) must RUN it from a
-        # workflow step, in both directions — a step with no plane file is the same defect seen
-        # from the other side. Same root binding as the sheet check above, and the same refusal of
+        # A repository that DECLARES an error plane (`error-plane-declared.nix`: its cells) must
+        # hold a cell, and a `ci/tests-error.nix` that declares nothing is refused. Same root
+        # binding as the sheet check above, and the same refusal of
         # a SILENT opt-out:
         # a non-declarer is green by construction, so there is nothing for it to opt out of, and a
         # declarer that could opt out would be the fail-open shape the check exists to close. The

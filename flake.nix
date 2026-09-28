@@ -64,7 +64,7 @@
     # cannot produce from text. Published for the same non-mkCi consumer as its neighbours: the
     # hub reaches the harness gates through `lib.checks` and not the flake module, so this is the
     # only route by which it can be gated like every mkCi consumer once it wires the check. Today
-    # the hub carries no `ci/tests-error.nix` and this check classifies its tree `no-plane`.
+    # the hub's `testsError` is empty, so it declares no plane and this check classifies it `no-plane`.
     lib.checks.ciPlaneCoverage = import ./ci-plane-coverage.nix;
 
     # The self-input invariant, published for its SCANNER as much as for its check. The derivation

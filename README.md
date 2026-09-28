@@ -64,8 +64,8 @@ derivations and functions as leaves, must evaluate. A repository with no root en
 `{ gen.ci.rootSurface.entry = "not-owed"; }`. A top-level tombstone is declared with its exact
 message, `gen.ci.rootSurface.retired.<name> = "<message>";`, which also generates the error-plane
 cell `testsError.root-surface-retired.test-retired-<name>` pinning that message, with the root's
-dependencies taken from `./ci`'s inputs through its `src` seam so the cell never fetches, and so is
-refused where `ci/tests-error.nix` is absent. The green is a statement about the library at its own
+dependencies taken from `./ci`'s inputs through its `src` seam so the cell never fetches. That cell
+declares the repository's error plane, so `checks.tests-error` runs it with no plane file. The green is a statement about the library at its own
 declared point only (`root-surface.nix` states the scope), and the walk has no depth bound: a
 cyclic namespace reds with `max-call-depth exceeded`.
 

@@ -43,8 +43,8 @@
 # excludes the name from the walk and refuses the declaration if the name is absent or no longer
 # throws. That a tombstone throws EXACTLY its message cannot be read here — Nix exposes no thrown
 # message to evaluation — so `retiredCells` below generates one error-plane cell per entry, and the
-# error plane pins the message. A declaration is therefore refused where no error plane
-# (`ci/tests-error.nix`) exists: the cell would be generated and never run in CI.
+# error plane pins the message. Those cells declare the plane (`error-plane-declared.nix`), so
+# `checks.tests-error` runs them in every column with no plane file (den-hoag-o7kjc).
 # ★ THE GUARANTEE IS SPLIT ACROSS TWO POINTS (den-hoag-o7kjc). `check` holds "the name throws" at
 # the declared point (root-lock pins, outside the sandbox). `retiredCells` holds "the message is
 # exactly `m`" with the root applied through its `src`/`inputs` seam to `./ci`'s inputs, so the cell
@@ -78,7 +78,6 @@ in
     }:
     let
       hasRoot = builtins.pathExists (root + "/default.nix");
-      hasPlane = builtins.pathExists (root + "/ci/tests-error.nix");
       retiredNames = builtins.attrNames retired;
       green = pkgs.runCommand "${name}-root-surface" { } "touch $out";
 
@@ -119,8 +118,6 @@ in
           "echo 'root-surface declared not-owed and the root has no default.nix; the declaration is the subject, and it holds.'; touch $out"
     else if !hasRoot then
       throw "root-surface: owed (the default) but the root has no default.nix; declare gen.ci.rootSurface.entry = \"not-owed\" if this repository publishes no root entry"
-    else if retired != { } && !hasPlane then
-      throw "root-surface: declares retired names (${builtins.concatStringsSep ", " retiredNames}) but has no ci/tests-error.nix; each tombstone's message is pinned by a generated error-plane cell, and without the plane file no CI step runs it"
     else
       owed;
 

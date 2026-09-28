@@ -31,9 +31,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
+# The listing and the declaration in ONE evaluation. `errorPlane.declared` is read without `or`: a flake
+# that does not publish it cannot say whether its plane is declared, and the listing refuses (rc 2).
 LIST = r"""
 let
-  plane = (builtins.getFlake (builtins.getEnv "GEN_REF")).testsError or { };
+  flake = builtins.getFlake (builtins.getEnv "GEN_REF");
+  plane = flake.testsError or { };
   hasPrefix = p: s: builtins.substring 0 (builtins.stringLength p) s == p;
   go = pre: set: builtins.concatMap (a:
     let v = set.${a}; in
@@ -44,7 +47,7 @@ let
     } ]
     else if builtins.isAttrs v then go (pre ++ [ a ]) v
     else [ ]) (builtins.attrNames set);
-in go [ ] plane
+in { declared = flake.errorPlane.declared; cells = go [ ] plane; }
 """
 
 # An `expectedError` cell returns "NOERROR" only if its expr forces deeply without error; an
@@ -97,13 +100,14 @@ def main():
     if r.returncode != 0:
         print("CONTROL FAILED: the error plane could not be listed:\n" + r.stderr[-2000:], file=sys.stderr)
         return 2
-    cells = json.loads(r.stdout)
-    declared = os.path.exists(os.path.join(root, "ci", "tests-error.nix"))
+    listing = json.loads(r.stdout)
+    # The declaration is the CELLS (`error-plane-declared.nix`), never a file name (den-hoag-o7kjc).
+    cells, declared = listing["cells"], listing["declared"]
     if not cells:
         if declared:
-            print("0/0 successful — REFUSED: ci/tests-error.nix is declared and collected 0 cells, the false pass.")
+            print("0/0 successful — REFUSED: an error plane is declared (errorPlane.declared) and collected 0 cells, the false pass.")
             return 1
-        print("0/0 — no error plane: ci/tests-error.nix is absent and testsError holds no cells.")
+        print("0/0 — no error plane: errorPlane.declared is false and testsError holds no cells.")
         return 0
 
     def run(c):

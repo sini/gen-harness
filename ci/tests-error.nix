@@ -85,11 +85,6 @@ in
           live = "x";
         };
       } "root-surface: declared retired but absent or no longer throwing: live";
-      # den-hoag-ydm94 G3: the tombstone's message cell would be generated and never run.
-      test-a-tombstone-without-an-error-plane-is-refused = refuses {
-        root = fx + "/top-throw";
-        retired.broken = "root-surface-fixture: top-level";
-      } "root-surface: declares retired names (broken) but has no ci/tests-error.nix";
       test-owed-without-a-root-entry-is-a-named-refusal = refuses {
         root = fx;
       } "root-surface: owed (the default) but the root has no default.nix";

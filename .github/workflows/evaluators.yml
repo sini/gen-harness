@@ -25,7 +25,8 @@
 #
 # ★ WHAT A GREEN COLUMN COVERS. Each column's own `nix` evaluates, in-process: every `nix flake
 # check` line (so `checks.default`, the batch asserter over `flake.tests`, and every check's
-# derivation) and the ci devShell. A declarer's error plane is one of those checks,
+# derivation) and the ci devShell. A declarer's error plane (declared by its cells, mkCi's
+# `errorPlane.declared`) is one of those checks,
 # `checks.tests-error` (gen-harness `error-plane-check.nix`): it builds THIS column's evaluator
 # release from the harness's engine input and runs every cell with it in the build sandbox, and
 # `evaluator identity` refuses a column whose running `nix` is not that engine's store path. The
@@ -156,6 +157,7 @@ jobs:
       # (chiefly nix-unit 2.35.1, compiled in the devShell) costs about what its Run step did.
 
       - name: evaluator identity
+        id: identity
         run: |
           line=$(nix --version | sed -n 1p)
           echo "evaluator: $line"
@@ -186,14 +188,25 @@ jobs:
           done <<< "$EVAL_CONF"
           # An environment NIX_PATH outranks the nix-path setting for a `<…>` lookup.
           [ -z "${NIX_PATH:-}" ] || { echo "::error::NIX_PATH is set: $NIX_PATH"; rc=1; }
-          # The error-plane engine (`checks.tests-error`) must be the binary this column runs: the
-          # same store path, not the same family or version.
-          if [ -f ci/tests-error.nix ]; then
-            running=$(dirname "$(dirname "$(readlink -f "$(command -v nix)")")")
-            engine=$(nix eval --raw "./ci#checks.x86_64-linux.tests-error.engine")
-            echo "error-plane engine: $engine"
-            [ "$engine" = "$running" ] || { echo "::error::the ${{ matrix.evaluator }} column's error-plane engine $engine is not its evaluator $running"; rc=1; }
-          fi
+          # The error plane is DECLARED BY ITS CELLS: mkCi's `errorPlane.declared`, the predicate
+          # `checks.tests-error` exists on, never a file name (den-hoag-o7kjc). One evaluation reads
+          # it and a declarer's engine; a ci flake that is not mkCi's publishes no `errorPlane`, has
+          # no harness error plane, and says so. A failed evaluation fails this step.
+          # A declarer's engine must be the binary this column runs: the same store path, not the
+          # same family or version. The `${…}` is Nix's interpolation, not the shell's.
+          # shellcheck disable=SC2016
+          plane=$(nix eval --raw "./ci#." --apply 'o: if !(o ? errorPlane) then "no-output" else if o.errorPlane.declared then "${o.errorPlane.engine.x86_64-linux}" else "undeclared"')
+          case "$plane" in
+            /nix/store/*)
+              echo "error_plane=declared" >> "$GITHUB_OUTPUT"
+              running=$(dirname "$(dirname "$(readlink -f "$(command -v nix)")")")
+              echo "error-plane engine: $plane"
+              [ "$plane" = "$running" ] || { echo "::error::the ${{ matrix.evaluator }} column's error-plane engine $plane is not its evaluator $running"; rc=1; }
+              ;;
+            undeclared) echo "error plane: not declared (errorPlane.declared = false)" ;;
+            no-output) echo "error plane: none (./ci publishes no errorPlane output; it is not an mkCi flake)" ;;
+            *) echo "::error::error plane: unreadable declaration '$plane'"; rc=1 ;;
+          esac
           exit "$rc"
 
       - name: flake checks
@@ -252,7 +265,7 @@ jobs:
           grep -Fxq "evaluator: $(nix-instantiate --version | sed -n 1p)" "$RUNNER_TEMP/tests-process.log"
 
       - name: error plane, by type (nix-unit, on the ci-locked upstream nix-expr)
-        if: matrix.evaluator == 'nix' && hashFiles('ci/tests-error.nix') != ''
+        if: matrix.evaluator == 'nix' && steps.identity.outputs.error_plane == 'declared'
         run: nix develop ./ci --command nix-unit --flake ./ci#testsError
 
       - name: extra
