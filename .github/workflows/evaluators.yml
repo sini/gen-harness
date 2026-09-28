@@ -190,12 +190,22 @@ jobs:
         env:
           FLAKE_CHECKS: ${{ inputs.flake-checks }}
         run: |
+          # A declarer's `checks.tests-error` judges its error plane with THIS column's evaluator,
+          # read from the environment, so its gate is impure (den-hoag-o7kjc; mkCi's
+          # `error-plane-check.nix`). `--no-build` would evaluate those cells and run none.
+          impure=()
+          if [ -f ci/tests-error.nix ]; then
+            GEN_EVALUATOR=$(dirname "$(dirname "$(readlink -f "$(command -v nix)")")")
+            GEN_EVAL_CONF=$(nix config show)
+            export GEN_EVALUATOR GEN_EVAL_CONF
+            impure=(--impure)
+          fi
           rc=0
           while IFS= read -r args; do
             [ -n "$args" ] || continue
-            echo "::group::nix flake check $args"
+            echo "::group::nix flake check ${impure[*]} $args"
             # shellcheck disable=SC2086
-            nix flake check $args || rc=1
+            nix flake check "${impure[@]}" $args || rc=1
             echo "::endgroup::"
           done <<< "$FLAKE_CHECKS"
           exit "$rc"

@@ -89,7 +89,10 @@ def main():
     # available") and Lix refuses ("shallow repositories are only allowed when `shallow = true;`").
     # With it all three read the same tree, shallow or not (measured, gen-harness b60292b CI run
     # 36045352952 and a local depth-1 clone).
-    env = dict(os.environ, GEN_REF=f"git+file://{root}?dir=ci&shallow=1")
+    # The second argument overrides the ref: `checks.tests-error` (`error-plane-check.nix`) runs this
+    # program in a build sandbox over an offline `path:` copy of the tree.
+    ref = sys.argv[2] if len(sys.argv) > 2 else f"git+file://{root}?dir=ci&shallow=1"
+    env = dict(os.environ, GEN_REF=ref)
     r = nix_eval(env, LIST)
     if r.returncode != 0:
         print("CONTROL FAILED: the error plane could not be listed:\n" + r.stderr[-2000:], file=sys.stderr)

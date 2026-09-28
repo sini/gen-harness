@@ -383,6 +383,16 @@ in
         };
 
         processPlaneCmd = import ./process-plane.nix { inherit pkgs name; };
+
+        # The error plane as CHECKS, judged by message by the column's own evaluator
+        # (`error-plane-check.nix`). A DECLARER only — the same cell-level antecedent as the
+        # `ci-error` hook below — because the checks read the evaluator from the environment, and
+        # a repository that declares no plane keeps a pure gate.
+        planeDeclared = lib.any (s: s != { }) (lib.attrValues testsError);
+        errorPlane = import ./error-plane-check.nix {
+          inherit pkgs lib name;
+          root = inputs.self.sourceInfo.outPath;
+        };
       in
       {
         # Pre-commit hooks: format check + unit tests
@@ -542,6 +552,8 @@ in
           echo "${toString (builtins.length (lib.flatten assertTests))} tests passed"
           touch $out
         '';
+        checks.tests-error-binding = lib.mkIf planeDeclared errorPlane.tests-error-binding;
+        checks.tests-error = lib.mkIf planeDeclared errorPlane.tests-error;
 
         devshells.default = {
           # The installer's LAST ACT writes `core.hooksPath` RELATIVE to the working-tree top-level
