@@ -67,6 +67,23 @@ in
       };
     };
 
+    # The adoption window: an undeclared consumer gets no suite even over `examples/`; the
+    # control is the same tree declared `{ }`, which reds totality.
+    test-an-unadopted-consumer-is-no-suite-over-examples = {
+      expr = suite null;
+      expected = { };
+    };
+    test-control-a-declared-empty-set-over-examples-reds-totality = {
+      expr = (suite { }).test-every-example-directory-is-declared;
+      expected = {
+        expr = [
+          "alpha"
+          "beta"
+        ];
+        expected = [ ];
+      };
+    };
+
     test-no-examples-and-no-declaration-is-no-suite = {
       expr = guard.cells {
         root = fx;

@@ -195,20 +195,24 @@ in
     '';
   };
 
-  # The consumer's DECLARED EXAMPLES, the same declared-obligation shape as rootSurface above: the
-  # default `{ }` is the invariant, so an `examples/` directory with no declaration reds its
-  # totality cell (`examples-guard.nix`).
+  # The consumer's DECLARED EXAMPLES. ★ ADOPTION WINDOW: the default `null` is "not yet adopted"
+  # and generates no suite, so publishing this option reds no consumer that has not declared it;
+  # any declaration, `{ }` included, arms totality. The window closes when the default becomes
+  # `{ }`, the same declared-obligation shape as rootSurface above, once every roster member with
+  # an `examples/` directory declares (den-hoag-qaa7o, spec §2.7).
   options.gen.ci.examples = lib.mkOption {
-    type = lib.types.attrsOf lib.types.raw;
-    default = { };
+    type = lib.types.nullOr (lib.types.attrsOf lib.types.raw);
+    default = null;
     description = ''
       One value per directory under `examples/`: `<dir> = <value>`, usually the example's `outputs`
       applied to this suite's own library values, so the example runs on the working tree and never
       on its lock. The generated `flake.tests.gen-ci-examples` suite holds that the declared names
       equal the directories on disk, that each value forces under `deepSeq`, and that every nix-unit
       leaf in it holds (`expected` equal, `expectedError` throwing). A value that emits derivations
-      declares its non-derivation outputs instead. Declare it in the same commit as the harness
-      bump that brings this option.
+      declares its non-derivation outputs instead. The default `null` is a consumer that has not
+      adopted the guard yet and gets no suite, so a bare harness bump reds no consumer; any
+      declaration, `{ }` included, arms the suite. A later harness revision makes `{ }` the
+      default and drops `null`, after which no value switches the suite off.
     '';
   };
 
@@ -225,7 +229,10 @@ in
       };
     };
 
-    flake.tests.gen-ci-examples = lib.mkIf (examplesSuite != { }) examplesSuite;
+    # The condition sits on the whole definition, as `flake.testsError` does above: `flake.tests`
+    # is `lazyAttrsOf`, so an `mkIf` on the attribute's VALUE keeps the name with `{ }` behind it,
+    # a phantom suite every `attrNames` reader counts.
+    flake.tests = lib.mkIf (examplesSuite != { }) { gen-ci-examples = examplesSuite; };
 
     # testSingletons.<suite>.<test> = { <test> = leaf; } — re-nests each leaf under a group keyed by its
     # OWN (test-prefixed) name, so `--flake .#testSingletons.<suite>.<test>` makes that singleton the
