@@ -97,6 +97,41 @@ in
         entry = "not-owed";
         retired.gone = gone;
       } "root-surface: declared not-owed but declares retired names (gone)";
+      test-a-foreign-declaration-at-an-absent-path-is-refused = refuses {
+        root = fx + "/foreign-root";
+        foreign = {
+          "engine.lib" = "x";
+          "engine.nope" = "x";
+        };
+      } "root-surface: declared foreign but the walk never reached a namespace there: engine.nope";
+      test-a-foreign-declaration-at-a-leaf-is-refused = refuses {
+        root = fx + "/foreign-root";
+        foreign = {
+          "engine.lib" = "x";
+          "own.x" = "x";
+        };
+      } "root-surface: declared foreign but the walk never reached a namespace there: own.x";
+      test-a-foreign-declaration-under-a-declared-root-is-refused = refuses {
+        root = fx + "/foreign-root";
+        foreign = {
+          "engine.lib" = "x";
+          "engine.lib.types" = "x";
+        };
+      } "root-surface: declared foreign but the walk never reached a namespace there: engine.lib.types";
+      # The nested path's declaration does not silence the own name `"engine.lib"`, which renders
+      # the same unquoted: its throw is still reached.
+      test-a-nested-path-key-does-not-declare-an-own-dotted-name = refuses {
+        root = fx + "/dotted-name";
+        foreign."engine.lib" = "x";
+      } "root-surface-fixture: an own name containing a dot";
+      test-not-owed-with-foreign-roots-is-refused =
+        refuses
+          {
+            root = fx;
+            entry = "not-owed";
+            foreign."engine.lib" = "x";
+          }
+          "root-surface: declared not-owed but declares foreign roots (engine.lib); a not-owed root publishes no names";
       test-an-undeclared-entry-value-is-refused = refuses {
         root = fx;
         entry = "maybe";

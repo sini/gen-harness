@@ -48,6 +48,7 @@ let
   rootSurface = import ./root-surface.nix;
   rsEntry = config.gen.ci.rootSurface.entry;
   rsRetired = config.gen.ci.rootSurface.retired;
+  rsForeign = config.gen.ci.rootSurface.foreign;
 
   # KNOWN LIMIT, and it belongs to this gate rather than to the suites it reads: `expr` is forced
   # for every cell unconditionally, so a cell whose `expr` ABORTS crashes the check instead of
@@ -152,7 +153,8 @@ in
       `checks.root-surface` holds. `owed`: the root is applied at its declared point
       (`import <root> { }`, or the root itself when it is a set) and every published name — a path
       through plain namespaces, with `_type`-tagged values, derivations and functions as leaves —
-      must evaluate to WHNF, except the declared `retired` tombstones. The green says that of the
+      must evaluate to WHNF, except the declared `retired` tombstones, and the walk does not
+      descend into a declared `foreign` root. The green says that of the
       library at its OWN declared point only (for a roster member, its root-lock pins), never at
       any other. `not-owed`: no root `default.nix` may exist, and that declaration is the check's
       subject. Declare it in the same commit as the harness bump that brings this option.
@@ -168,6 +170,24 @@ in
       generated `flake.testsError.root-surface-retired.test-retired-<name>` cell forced at the root
       seam, with its dependencies from `./ci`'s inputs. That cell declares the error plane, so
       `checks.tests-error` runs it in every column.
+    '';
+  };
+
+  options.gen.ci.rootSurface.foreign = lib.mkOption {
+    type = lib.types.attrsOf lib.types.nonEmptyStr;
+    default = { };
+    example = {
+      "adapter.engines.engine.lib" = "nixpkgs lib";
+    };
+    description = ''
+      Re-exported foreign namespaces: `<name-path> = <origin>`. A namespace another eval built is
+      not this library's published surface, so the walk forces each declared path to WHNF and does
+      not descend into it. The key is the path as the walk's error context renders it, without the
+      `lib.` prefix, a segment that is not a plain identifier quoted as nixpkgs `showAttrPath`
+      quotes it. A declaration the walk never stops at (absent, a leaf, under a tombstone or under
+      another declared root) is refused by name, and so is any declaration beside `entry =
+      "not-owed"`. The check cannot verify that a declared path is foreign; the origin is stated
+      for the reader.
     '';
   };
 
@@ -440,6 +460,7 @@ in
           root = inputs.self.sourceInfo.outPath;
           entry = rsEntry;
           retired = rsRetired;
+          foreign = rsForeign;
         };
 
         checks.ci-plane-coverage = import ./ci-plane-coverage.nix {

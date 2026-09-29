@@ -53,6 +53,21 @@
 # own tree, the same text at either point; a message interpolating, or a value reachable through, a
 # dependency value is outside that premise, and neither half would see the difference.
 # A nested tombstone is not expressible; the walk reds on it and names its path.
+#
+# ★ FOREIGN ROOTS ARE DECLARED (den-hoag-ydm94 R9 (a)). A namespace re-exported from another eval
+# (ADR-0014: re-handing, not constructing) is not this library's published surface: the re-export
+# site is its own published name, what the name points at is not. `foreign.<path> = <origin>` names
+# such a site; the walk forces it to WHNF and does not descend. A declaration the walk never stopped
+# at (an absent path, a leaf, a path under a tombstone or under another declared root) is refused by
+# name, so a declaration is live exactly when the walk used it. The key is the path as the walk
+# renders it, without the `lib.` prefix, a segment that is not a plain identifier quoted as nixpkgs
+# `showAttrPath` quotes it: an own name `"engine.lib"` and the nested path `engine.lib` are distinct
+# keys, and the error context below names the key a declarer writes.
+# ★ THE LIMIT. The check cannot verify that a declared path IS foreign: a declaration on an own
+# namespace silences that namespace's walk, and the origin text and the stale refusal are what an
+# honest caller gets. The ruling's other clause, that an UNDECLARED foreign root is refused by name,
+# is not constructed here: an undeclared foreign namespace is walked as own (a divergent one reds
+# with `max-call-depth exceeded`, a finite one is walked green).
 let
   # s0: the root at its declared point. Arity dispatch because neither `import p` nor
   # `import p { }` is total over both root shapes (a set root, a lambda root).
@@ -75,6 +90,7 @@ in
       root,
       entry ? "owed",
       retired ? { },
+      foreign ? { },
     }:
     let
       hasRoot = builtins.pathExists (root + "/default.nix");
@@ -86,23 +102,42 @@ in
           s = point root;
           stale = builtins.filter (n: !(s ? ${n}) || (builtins.tryEval s.${n}).success) retiredNames;
           ns = v: builtins.isAttrs v && !(v ? _type) && (v.type or null) != "derivation";
+          # nixpkgs `lib.strings.escapeNixIdentifier`, the segment rendering of `showAttrPath`.
+          seg =
+            n:
+            if builtins.match "[a-zA-Z_][a-zA-Z0-9_'-]*" n != null then
+              n
+            else
+              builtins.replaceStrings [ "$" ] [ "\\$" ] (builtins.toJSON n);
+          # Returns the declared foreign roots it stopped at.
           walk =
             p: v:
             builtins.foldl' (
               acc: n:
               let
                 x = v.${n};
-                q = "${p}.${n}";
+                q = if p == "" then seg n else "${p}.${seg n}";
               in
-              builtins.addErrorContext "root-surface: while forcing the published name ${q}" (
-                builtins.seq x (if ns x then builtins.seq (walk q x) acc else acc)
+              builtins.addErrorContext "root-surface: while forcing the published name lib.${q}" (
+                builtins.seq x (
+                  if !(ns x) then
+                    acc
+                  else if foreign ? ${q} then
+                    acc ++ [ q ]
+                  else
+                    acc ++ walk q x
+                )
               )
-            ) null (builtins.attrNames v);
+            ) [ ] (builtins.attrNames v);
+          stopped = walk "" (builtins.removeAttrs s retiredNames);
+          unreached = builtins.filter (k: !(builtins.elem k stopped)) (builtins.attrNames foreign);
         in
         if stale != [ ] then
           throw "root-surface: declared retired but absent or no longer throwing: ${builtins.concatStringsSep ", " stale}"
+        else if unreached != [ ] then
+          throw "root-surface: declared foreign but the walk never reached a namespace there: ${builtins.concatStringsSep ", " unreached}"
         else
-          builtins.seq (walk "lib" (builtins.removeAttrs s retiredNames)) green;
+          builtins.seq stopped green;
     in
     # Every arm below is a NAMED refusal: the direct route has no module type in front of it, and an
     # interpreter error ("path does not exist") names nothing a caller can act on.
@@ -111,6 +146,8 @@ in
     else if entry == "not-owed" then
       if hasRoot then
         throw "root-surface: declared not-owed but the root has a default.nix; drop the declaration, or remove the root entry"
+      else if foreign != { } then
+        throw "root-surface: declared not-owed but declares foreign roots (${builtins.concatStringsSep ", " (builtins.attrNames foreign)}); a not-owed root publishes no names"
       else if retired != { } then
         throw "root-surface: declared not-owed but declares retired names (${builtins.concatStringsSep ", " retiredNames}); a tombstone is a published name, and a not-owed root publishes none"
       else

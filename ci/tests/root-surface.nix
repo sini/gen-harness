@@ -56,6 +56,38 @@ in
       expected = "fx-root-surface";
     };
 
+    test-a-declared-foreign-root-stops-the-walk = {
+      expr = check {
+        root = fx + "/foreign-root";
+        foreign."engine.lib" = "a self-referential fixture namespace";
+      };
+      expected = "fx-root-surface";
+    };
+
+    # LIVE CONTROL for the cell above: the same root undeclared refuses, because the walk forces
+    # `bad`. Without it the cell above is satisfied by a walk that descends nowhere.
+    test-control-an-undeclared-foreign-root-is-walked = {
+      expr =
+        (builtins.tryEval (
+          inputs.gen-harness.lib.checks.rootSurface {
+            inherit pkgs;
+            name = "fx";
+            root = fx + "/foreign-root";
+          }
+        )).success;
+      expected = false;
+    };
+
+    # The own name `"engine.lib"` is declared by its quoted key; the nested `engine.lib` is walked.
+    # Its pair on the error plane declares the nested path and reds on the own name's throw.
+    test-a-quoted-key-declares-the-own-dotted-name = {
+      expr = check {
+        root = fx + "/dotted-name";
+        foreign."\"engine.lib\"" = "a fixture own name";
+      };
+      expected = "fx-root-surface";
+    };
+
     test-not-owed-holds-at-a-root-with-no-default-nix = {
       expr = check {
         root = fx;
