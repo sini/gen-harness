@@ -59,35 +59,31 @@ in
   readRoot = root: lib.optional (builtins.pathExists (root + "/examples")) (root + "/examples");
 
   # `{ root, declared }` -> the `gen-ci-examples` suite, `{ }` when there is nothing to hold.
-  # `declared = null` is a consumer that has not adopted the guard: no suite.
   cells =
     { root, declared }:
-    if declared == null then
-      { }
-    else
-      let
-        dir = root + "/examples";
-        present = builtins.pathExists dir;
-        onDisk = lib.optionals present (
-          builtins.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir dir))
-        );
-      in
-      lib.optionalAttrs (present || declared != { }) (
-        {
-          test-every-example-directory-is-declared = {
-            expr = onDisk;
-            expected = builtins.attrNames declared;
-          };
-        }
-        // lib.concatMapAttrs (n: v: {
-          "test-${n}-forces-under-deepSeq" = {
-            expr = builtins.deepSeq (strip v) "forced";
-            expected = "forced";
-          };
-          "test-${n}-every-leaf-holds" = {
-            expr = map lib.showAttrPath (failing [ ] v);
-            expected = [ ];
-          };
-        }) declared
+    let
+      dir = root + "/examples";
+      present = builtins.pathExists dir;
+      onDisk = lib.optionals present (
+        builtins.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir dir))
       );
+    in
+    lib.optionalAttrs (present || declared != { }) (
+      {
+        test-every-example-directory-is-declared = {
+          expr = onDisk;
+          expected = builtins.attrNames declared;
+        };
+      }
+      // lib.concatMapAttrs (n: v: {
+        "test-${n}-forces-under-deepSeq" = {
+          expr = builtins.deepSeq (strip v) "forced";
+          expected = "forced";
+        };
+        "test-${n}-every-leaf-holds" = {
+          expr = map lib.showAttrPath (failing [ ] v);
+          expected = [ ];
+        };
+      }) declared
+    );
 }

@@ -4,7 +4,7 @@
 # its `expr` failing under `tryEval`, read here as a value so this suite stays green while showing
 # the guard fires. `clean/` carries `examples/alpha`, `examples/beta` and a plain file the totality
 # cell must not count; the fixture root itself carries no `examples/`.
-{ lib, ... }:
+{ lib, options, ... }:
 let
   guard = import ../../examples-guard.nix { inherit lib; };
   fx = ./_fixtures/examples-guard;
@@ -67,11 +67,16 @@ in
       };
     };
 
-    # The adoption window: an undeclared consumer gets no suite even over `examples/`; the
-    # control is the same tree declared `{ }`, which reds totality.
-    test-an-unadopted-consumer-is-no-suite-over-examples = {
-      expr = suite null;
+    # The option admits no opt-out: its default is the empty declaration and `null` is not a
+    # value of its type. The control is that empty declaration over `examples/`, which reds
+    # totality, so the default is a guard and not a switch.
+    test-the-examples-option-defaults-to-the-empty-declaration = {
+      expr = options.gen.ci.examples.default;
       expected = { };
+    };
+    test-the-examples-option-refuses-null = {
+      expr = options.gen.ci.examples.type.check null;
+      expected = false;
     };
     test-control-a-declared-empty-set-over-examples-reds-totality = {
       expr = (suite { }).test-every-example-directory-is-declared;

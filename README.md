@@ -89,12 +89,8 @@ nix-unit leaf inside it holds (`expected` equal, `expectedError` throwing; the e
 not checked). An example that cannot be evaluated from the member's own suite without reaching a
 published copy of the member has no declaration that can satisfy the totality cell.
 
-The suite is adopted per consumer. The option defaults to `null`, meaning not yet adopted, and a
-consumer at that default gets no suite, so bumping the harness reds nobody. Any declaration arms
-it, `gen.ci.examples = { };` included, and from then on every directory under `examples/` must be
-declared. Once every consumer has declared, a later harness revision makes `{ }` the default and
-removes `null`, so the suite can no longer be switched off; a consumer with an undeclared
-`examples/` directory then reds at its harness bump.
+The option defaults to `{ }`, the empty declaration, and no value of it switches the suite off:
+a consumer that carries `examples/` declares every directory in it, or its totality cell reds.
 
 ### The declared read domain
 
