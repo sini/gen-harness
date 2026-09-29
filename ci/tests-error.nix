@@ -186,6 +186,37 @@ in
       };
     };
 
+    # `checks.tests-error`'s refusals under a rebind: the in-memory override refusal still reads
+    # every direct edge, rebound or not, and a name with no pin in the rebind lock is named. The
+    # green arms are `tests/error-plane-rebind.nix`.
+    flake.testsError.error-plane-rebind =
+      let
+        fx = import ./tests/_fixtures/error-plane-rebind {
+          inherit lib;
+          inherit (inputs) gen-harness;
+        };
+        refusesWith = inputs': names: msg: {
+          expr = fx.check inputs' names;
+          expectedError = {
+            type = "ThrownError";
+            msg = lib.escapeRegex msg;
+          };
+        };
+      in
+      {
+        test-an-unrebound-input-diverged-in-memory-is-refused = refusesWith (
+          fx.coherent // { tool = fx.pin "7" "sha256-C"; }
+        ) fx.names "error plane: `tool` is overridden in memory";
+        # The declarer's own pin for a rebound name disagrees with the grafted file node.
+        test-a-rebound-input-at-another-pin-in-memory-is-refused = refusesWith (
+          fx.coherent // { gen-x = fx.pin "1" "sha256-A"; }
+        ) fx.names "error plane: `gen-x` is overridden in memory";
+        test-a-name-the-rebind-lock-root-lacks-is-refused = refusesWith fx.coherent [
+          "gen-x"
+          "gen-q"
+        ] "error plane: rebind names `gen-q`, which the rebind lock's root does not declare";
+      };
+
     flake.testsError.escape-set = {
       # The answer is asserted, not merely the absence of an abort: `]` is passed through unescaped
       # and matched as the literal it already is, so the boolean is nixpkgs'.

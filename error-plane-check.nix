@@ -21,6 +21,12 @@
 # direct ci input (a root edge of the lock, walked by edge, never by node name) must carry the
 # identity its locked node records, `rev` and `narHash` alike, or the check refuses by name. To
 # test a change against a consumer's plane, write the lock: `nix flake lock ./ci --override-input …`.
+#
+# ★ THE REBIND. A caller judging the plane at another lock's pins passes `rebind = { lock; names; }`
+# and the lock evaluated is the declarer's with those root edges grafted onto `rebind.lock`
+# (`error-plane-rebind.nix`). The refusal is unchanged and reads the grafted lock: the caller's
+# `inputs` must carry the rebind lock's identity for every name it rebinds, so the in-memory pins and
+# the file the sandbox reads cannot disagree for a rebound name either.
 {
   pkgs,
   lib,
@@ -30,12 +36,16 @@
   inputs,
   genInputs,
   system,
+  rebind ? null,
 }:
 let
   ev = import ./error-plane-engines.nix { inherit lib genInputs system; };
   inherit (ev) family engine;
 
-  lock = builtins.fromJSON (builtins.readFile "${root}/ci/flake.lock");
+  lock = import ./error-plane-rebind.nix {
+    inherit lib rebind;
+    lock = builtins.fromJSON (builtins.readFile "${root}/ci/flake.lock");
+  };
   rootEdges = lock.nodes.${lock.root}.inputs or { };
 
   # A `follows` edge is a list and names no node of its own; an engine edge is consumed from memory.

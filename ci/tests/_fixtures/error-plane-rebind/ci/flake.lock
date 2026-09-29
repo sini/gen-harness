@@ -1,0 +1,80 @@
+{
+  "nodes": {
+    "fixture": {
+      "inputs": {
+        "gen-x": "gen-x_2"
+      },
+      "locked": {
+        "narHash": "sha256-D",
+        "owner": "o",
+        "repo": "fixture",
+        "rev": "4",
+        "type": "github"
+      }
+    },
+    "gen-x": {
+      "inputs": {
+        "gen-y": "gen-y"
+      },
+      "locked": {
+        "narHash": "sha256-A",
+        "owner": "o",
+        "repo": "gen-x",
+        "rev": "1",
+        "type": "github"
+      }
+    },
+    "gen-x_2": {
+      "locked": {
+        "narHash": "sha256-E",
+        "owner": "o",
+        "repo": "gen-x",
+        "rev": "5",
+        "type": "github"
+      }
+    },
+    "gen-y": {
+      "locked": {
+        "narHash": "sha256-B",
+        "owner": "o",
+        "repo": "gen-y",
+        "rev": "2",
+        "type": "github"
+      }
+    },
+    "gen-z": {
+      "locked": {
+        "narHash": "sha256-F",
+        "owner": "o",
+        "repo": "gen-z",
+        "rev": "6",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "fixture": "fixture",
+        "gen-x": "gen-x",
+        "gen-y": "gen-y",
+        "gen-z": "gen-z",
+        "tool": "tool"
+      }
+    },
+    "tool": {
+      "inputs": {
+        "gen-x": [
+          "gen-x"
+        ]
+      },
+      "locked": {
+        "narHash": "sha256-C",
+        "owner": "o",
+        "repo": "tool",
+        "rev": "3",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

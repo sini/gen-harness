@@ -182,8 +182,10 @@ it builds the column's own evaluator release from the harness's engine input and
 against one upstream nix-expr whatever evaluator is installed. The column's `evaluator identity`
 step refuses a run whose `nix` is not that engine's store path. The check evaluates `ci/flake.lock`
 as written, so an in-memory `--override-input` of a ci input is refused by name: write the lock to
-test a harness change against a consumer. The `nix` column also keeps the nix-unit step, which alone
-checks `expectedError.type`. Where
+test a harness change against a consumer. A caller outside the declarer's flake builds the same
+check through `lib.checks.errorPlane`, and its `rebind` judges the plane with named root inputs
+grafted onto another lock's pins; the refusal then reads the grafted lock. The `nix` column also
+keeps the nix-unit step, which alone checks `expectedError.type`. Where
 `ci/tests-process.nix` exists, the process plane runs through `ci --tests-process`: the consumer's
 `apps.<system>.tests-process` program, run outside the sandbox so its cells call the column's
 `nix-instantiate`, and refused if its closure carries an evaluator (`process-plane.nix`). Formatting

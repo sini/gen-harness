@@ -80,6 +80,13 @@
     # (`retiredCells` in the same file); a direct consumer declaring `retired` owes them itself.
     lib.checks.rootSurface = (import ./root-surface.nix).check;
 
+    # A declarer's `checks.tests-error`, for a caller outside that declarer's flake: the hub judges
+    # each member's error plane at the hub's own pins through `rebind`. Unlike its neighbours it
+    # reads this flake's own inputs, because the engine it builds is the harness's input for the
+    # evaluating family, so `genInputs` is bound here rather than taken.
+    lib.checks.errorPlane =
+      args: (import ./error-plane-check.nix (args // { genInputs = inputs; })).tests-error;
+
     # ★ THE TWO-ACT LOCK BUMP, PUBLISHED AS A BUILDER RATHER THAN AS A DEVSHELL ENTRY. Every mkCi
     # consumer gets `relock` through `flakeModule.nix`, which is the ordinary route and is
     # unchanged. The hub is the case this exists for: it is legitimately NOT an mkCi consumer — it
