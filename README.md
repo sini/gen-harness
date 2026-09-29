@@ -72,6 +72,24 @@ declaration the walk never stops at is refused by name. The green is a statement
 declared point only (`root-surface.nix` states the scope), and the walk has no depth bound: a
 cyclic namespace reds with `max-call-depth exceeded`.
 
+`examples/` is held the same way. Each directory under it is declared with the value the suite
+should force, `gen.ci.examples.<dir> = <value>;`, usually the example's `outputs` applied to the
+suite's own library values, so the example runs on the working tree and never on its own lock:
+
+```nix
+gen.ci.examples.demo = (import ../../examples/demo/flake.nix).outputs {
+  gen-algebra.lib = genAlgebra;
+  nixpkgs.lib = lib;
+};
+```
+
+The generated suite `tests.gen-ci-examples` holds three things: the declared names equal the
+directories on disk (so an undeclared example reds, and the default `{ }` is the invariant), each
+value forces under `deepSeq`, and every nix-unit leaf inside it holds (`expected` equal,
+`expectedError` throwing; the error's message is not checked). An example that cannot be evaluated
+from the member's own suite without reaching a published copy of the member has no declaration
+that can satisfy the totality cell.
+
 ### The declared read domain
 
 A suite's evaluator reads a **git-filtered** copy of the repository, so a file git does not know
@@ -107,6 +125,9 @@ one value, never two statements of one check.
 `testModules` is covered unconditionally, so **most suites declare nothing**. A suite that reads
 outside its collection root — a corpus of documents, a fixture tree beside `ci/` — lists those
 paths in `readRoots`, and they are **added** to the collection root rather than replacing it.
+`examples/` is added by the harness whenever the repository carries it, with the same semantics as
+every other root: a gitignored file under it, such as a `result` link left by `nix build` inside an
+example, is refused too.
 
 ### Tools
 

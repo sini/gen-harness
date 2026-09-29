@@ -49,6 +49,10 @@ let
   rsEntry = config.gen.ci.rootSurface.entry;
   rsRetired = config.gen.ci.rootSurface.retired;
   rsForeign = config.gen.ci.rootSurface.foreign;
+  examplesSuite = (import ./examples-guard.nix { inherit lib; }).cells {
+    root = inputs.self.sourceInfo.outPath;
+    declared = config.gen.ci.examples;
+  };
 
   # KNOWN LIMIT, and it belongs to this gate rather than to the suites it reads: `expr` is forced
   # for every cell unconditionally, so a cell whose `expr` ABORTS crashes the check instead of
@@ -191,6 +195,23 @@ in
     '';
   };
 
+  # The consumer's DECLARED EXAMPLES, the same declared-obligation shape as rootSurface above: the
+  # default `{ }` is the invariant, so an `examples/` directory with no declaration reds its
+  # totality cell (`examples-guard.nix`).
+  options.gen.ci.examples = lib.mkOption {
+    type = lib.types.attrsOf lib.types.raw;
+    default = { };
+    description = ''
+      One value per directory under `examples/`: `<dir> = <value>`, usually the example's `outputs`
+      applied to this suite's own library values, so the example runs on the working tree and never
+      on its lock. The generated `flake.tests.gen-ci-examples` suite holds that the declared names
+      equal the directories on disk, that each value forces under `deepSeq`, and that every nix-unit
+      leaf in it holds (`expected` equal, `expectedError` throwing). A value that emits derivations
+      declares its non-derivation outputs instead. Declare it in the same commit as the harness
+      bump that brings this option.
+    '';
+  };
+
   config = {
     systems = lib.systems.flakeExposed;
 
@@ -203,6 +224,8 @@ in
         retired = rsRetired;
       };
     };
+
+    flake.tests.gen-ci-examples = lib.mkIf (examplesSuite != { }) examplesSuite;
 
     # testSingletons.<suite>.<test> = { <test> = leaf; } — re-nests each leaf under a group keyed by its
     # OWN (test-prefixed) name, so `--flake .#testSingletons.<suite>.<test>` makes that singleton the

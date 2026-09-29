@@ -51,7 +51,15 @@ let
   # worktree-relative pathspecs. Bound out of that derivation so the PUBLISHED guard
   # (`read-roots-guard.nix`, `flake.nix`'s `lib.readRootsGuard`) can take the same paths a
   # non-mkCi consumer would have to derive itself otherwise (`den-hoag-g2glu`).
-  readRootsDeclared = [ testModules ] ++ readRoots;
+  #
+  # `examples/` joins BY CONSTRUCTION, never by declaration: the examples guard reads it
+  # (`examples-guard.nix`), and a member that forgot to declare it would be the fail-open this
+  # removes — an untracked example is absent from the source and silently absent from totality.
+  readRootsDeclared = [
+    testModules
+  ]
+  ++ readRoots
+  ++ (import ./examples-guard.nix { inherit lib; }).readRoot inputs.self.sourceInfo.outPath;
 
   # The declared read domain, as worktree-relative pathspecs for the shell half of the guard.
   # Derived HERE, once, from the same values the harness hands `import-tree` and the cells —
