@@ -95,6 +95,12 @@ wire further invocation points — a runner of its own over some other output, s
 the guard only if they call it themselves. That is why the count is stated as the harness's rather
 than as the repository's: nothing here can enumerate what a consumer adds.
 
+The guard itself is `lib.readRootsGuard { pkgs, name, sourceRoot, roots }`, published for a
+non-mkCi consumer to run the SAME check `mkCi` wires — the gen hub, whose gate exposes flake checks
+rather than a nix-unit `tests` output and so cannot take the module. `flakeModule.nix` imports the
+same file for the three invocation points above, so an `mkCi` consumer's guard and the hub's are
+one value, never two statements of one check.
+
 `testModules` is covered unconditionally, so **most suites declare nothing**. A suite that reads
 outside its collection root — a corpus of documents, a fixture tree beside `ci/` — lists those
 paths in `readRoots`, and they are **added** to the collection root rather than replacing it.

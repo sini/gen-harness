@@ -29,10 +29,11 @@ in
   # this would be a Nix default, and a Nix default is REPLACED rather than extended — so the first
   # consumer to declare a root would drop the collection root out of the guard's coverage and
   # restore the very defect the guard exists for. Under the concatenation below there is no
-  # declaration a consumer can write that removes it — but only because `readRootsRel` is
-  # re-pinned AFTER `// specialArgs` in the specialArgs merge. Merged before it, a consumer
-  # writing `specialArgs.readRootsRel` silently replaced the derived domain and disabled the
-  # guard, which is this comment's own claim failing at a route the README documents.
+  # declaration a consumer can write that removes it — but only because `readRootsRel` and
+  # `readRootsDeclared` are both re-pinned AFTER `// specialArgs` in the specialArgs merge.
+  # Merged before it, a consumer writing `specialArgs.readRootsRel` (or `.readRootsDeclared`)
+  # silently replaced the derived domain and disabled the guard, which is this comment's own
+  # claim failing at a route the README documents.
   readRoots ? [ ],
   specialArgs ? { },
   extraModules ? [ ],
@@ -46,13 +47,19 @@ let
   resolve = name: if inputs ? ${name} then inputs.${name} else genInputs.${name};
   import-tree = import (resolve "import-tree");
 
+  # The declared read domain, UNDERIVED: the raw paths, before `readroots.nix` strips them to
+  # worktree-relative pathspecs. Bound out of that derivation so the PUBLISHED guard
+  # (`read-roots-guard.nix`, `flake.nix`'s `lib.readRootsGuard`) can take the same paths a
+  # non-mkCi consumer would have to derive itself otherwise (`den-hoag-g2glu`).
+  readRootsDeclared = [ testModules ] ++ readRoots;
+
   # The declared read domain, as worktree-relative pathspecs for the shell half of the guard.
   # Derived HERE, once, from the same values the harness hands `import-tree` and the cells —
   # a root the guard does not cover is then a root the suite cannot read.
   readRootsRel = import ./readroots.nix {
     inherit lib;
     sourceRoot = inputs.self.sourceInfo.outPath;
-  } ([ testModules ] ++ readRoots);
+  } readRootsDeclared;
 in
 (resolve "flake-parts").lib.mkFlake
   {
@@ -68,7 +75,7 @@ in
     }
     // specialArgs
     // {
-      inherit readRootsRel;
+      inherit readRootsRel readRootsDeclared;
     };
   }
   {

@@ -112,5 +112,16 @@
     # hand its names to the guard, and deriving them at the call site would be a second
     # statement of the membership.
     lib.mdformatBasePlugins = import ./mdformat-plugins.nix;
+
+    # ★ THE READ-ROOTS GUARD, PUBLISHED FOR THE SAME NON-MKCI CONSUMER AS `lib.relock`. The gen
+    # hub exposes flake checks and a perf app rather than a nix-unit `tests` output, so it cannot
+    # take the module — it wires its `ci` devshell command from `lib.checks.*`-shaped surface à
+    # la carte, and the read-roots guard is the one gate every mkCi consumer gets from
+    # `flakeModule.nix` that a non-mkCi consumer had no route to. `flakeModule.nix` imports the
+    # same file for its own `perSystem` binding; Nix caches `import` by path, so the module's
+    # `readRootsGuard` and this one are the SAME value in any evaluation that reaches both, and
+    # a consumer cannot drift from the published surface by construction rather than by
+    # discipline. `{ pkgs, name, sourceRoot, roots }` -> the guard derivation (`den-hoag-g2glu`).
+    lib.readRootsGuard = import ./read-roots-guard.nix;
   };
 }
