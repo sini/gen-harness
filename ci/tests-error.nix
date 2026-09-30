@@ -208,9 +208,9 @@ in
           fx.coherent // { tool = fx.pin "7" "sha256-C"; }
         ) fx.names "error plane: `tool` is overridden in memory";
         # The declarer's own pin for a rebound name disagrees with the grafted file node.
-        test-a-rebound-input-at-another-pin-in-memory-is-refused = refusesWith (
-          fx.coherent // { gen-x = fx.pin "1" "sha256-A"; }
-        ) fx.names "error plane: `gen-x` is overridden in memory";
+        test-a-rebound-input-at-another-pin-in-memory-is-refused =
+          refusesWith (fx.coherent // { gen-x = fx.pin "1" "sha256-A"; }) fx.names
+            "error plane: `gen-x` is overridden in memory, and the error plane evaluates ci/flake.lock as written with its rebound root edges grafted onto the caller's rebind lock";
         test-a-name-the-rebind-lock-root-lacks-is-refused = refusesWith fx.coherent [
           "gen-x"
           "gen-q"

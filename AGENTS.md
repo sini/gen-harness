@@ -44,7 +44,8 @@ the root. The gates live in `./ci`.
 | `lib.mkCi` | `{ inputs, name, testModules, readRoots ? [ ], specialArgs ? { }, extraModules ? [ ] } -> flake-parts outputs` — closed attrset pattern (no `...`) |
 
 **Check builders, for a repository gated by this machinery without being an `mkCi` consumer** — pure
-functions of `pkgs`, no flake-parts module, no gen input.
+functions of `pkgs`, no flake-parts module, no gen input. `lib.checks.errorPlane` alone also reads the
+harness's own inputs, for the engine it builds per evaluator family.
 
 | Export                         | Signature                                                                                                                                                                                                                                                                                |
 | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -812,7 +812,7 @@ let
       fi
     '';
 
-  repair = "a `relock` behaviour arm stopped holding. Read WHICH arm and WHICH WAY. An arm that expected a REFUSAL and got something else means the command's refusing half has regressed — repair the command, never the arm; every one of these encodes a defect that reached a human. An arm that expected the CI-ONLY ACT and now refuses means the zero-root-input discrimination has regressed, which is `den-hoag-9jr` all over again. If an arm fails because it needed the network, it was added to the wrong cell: this one is hermetic by assertion and the acting half is exercised by running the command.";
+  repair = "a `relock` behaviour arm stopped holding. Read WHICH arm and WHICH WAY. An arm that expected a REFUSAL and got something else means the command's refusing half has regressed — repair the command, never the arm; every one of these encodes a defect that reached a human. An arm that expected the CI-ONLY ACT and now refuses means the zero-root-input discrimination has regressed, which is the zero-root-input defect again: the command refusing exactly the members that declare no root inputs, the leaves the rest of the roster depends on. If an arm fails because it needed the network, it was added to the wrong cell: this one is hermetic by assertion and the acting half is exercised by running the command.";
 in
 let
   unshare = lib.getExe' pkgs.util-linux "unshare";

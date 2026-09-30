@@ -100,7 +100,12 @@ in
     if overridden != [ ] then
       throw "error plane: ${lib.concatMapStringsSep ", " (n: "`${n}`") overridden} ${
         if builtins.length overridden == 1 then "is" else "are"
-      } overridden in memory, and the error plane evaluates ci/flake.lock as written, so it would judge the cells at the pin the file names. Write the lock instead: `nix flake lock ./ci --override-input <input> <ref>`"
+      } overridden in memory, and the error plane evaluates ${
+        if rebind == null then
+          "ci/flake.lock as written, so it would judge the cells at the pin the file names. Write the lock instead: `nix flake lock ./ci --override-input <input> <ref>`"
+        else
+          "ci/flake.lock as written with its rebound root edges grafted onto the caller's rebind lock, so it would judge the cells at the pin that grafted lock names. Write the lock the pin is read from instead: ci/flake.lock, or the rebind lock for a rebound name"
+      }"
     else
       pkgs.runCommand "${name}-tests-error"
         {
