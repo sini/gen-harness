@@ -151,6 +151,26 @@ let
         nixpkgs = ghNode "${fixtureName}-nixpkgs";
       };
   cleanCiLock = mkLock { ${alpha} = alpha; } { ${alpha} = ghNode alpha; };
+
+  # ── THE EXAMPLE SHAPES (den-hoag-eu9do). A library example's lock pins a foreign repository only;
+  # an integration example's (or an unconverted library example's) resolves to this repository.
+  # `movedExampleLock` is what the stub's bump writes for a clean example, and
+  # `selfBumpedExampleLock` what it writes when the bump pulls this repository in (the hub-tip shape).
+  cleanExampleLock = mkLock { ${alpha} = alpha; } { ${alpha} = ghNode alpha; };
+  selfExampleLock = mkLock { ${fixtureName} = fixtureName; } { ${fixtureName} = ghNode fixtureName; };
+  movedExampleLock = mkLock { ${alpha} = alpha; } {
+    ${alpha} = ghNode alpha // {
+      locked = (ghNode alpha).locked // {
+        rev = "4444444444444444444444444444444444444444";
+      };
+    };
+  };
+  selfBumpedExampleLock = mkLock { ${alpha} = alpha; } {
+    ${alpha} = ghNode alpha // {
+      inputs.${fixtureName} = fixtureName;
+    };
+    ${fixtureName} = ghNode fixtureName;
+  };
   # A ci lock that ALREADY carries this repository — the state §2.2's incoming arm refuses.
   dirtyCiLock = mkLock { ${alpha} = alpha; } {
     ${alpha} = ghNode alpha;
@@ -306,6 +326,16 @@ let
       ciLock = callerCiLock;
       flake = declaredFlake;
       workflow = callerWorkflow;
+    };
+    # `two-act` with two examples: `integration` resolves to this repository, `library` does not.
+    examples = {
+      rootLock = declaredRootLock;
+      ciLock = cleanCiLock;
+      flake = declaredFlake;
+      examples = {
+        integration = selfExampleLock;
+        library = cleanExampleLock;
+      };
     };
     # WELL-FORMED down to its root node, whose `inputs` is not a set: it passes the readability
     # gate and reaches `hasInput`, whose `has` then fails — the site behind the gate.
@@ -678,6 +708,44 @@ let
       locks = "unchanged";
     }
     {
+      # ★ den-hoag-eu9do G4. An example whose lock resolves to this repository pins it at its
+      # pre-relock tip, and bumping it never settles, so it is SKIPPED BY NAME, its lock untouched.
+      # The library example beside it is bumped (the stub writes `movedExampleLock`), which is what
+      # shows the step ran at all; its delta must not arm the formatter/hook catch-up.
+      label = "an-example-resolving-to-this-repository-is-skipped-by-name";
+      fixture = "examples";
+      args = [ ];
+      stubUpdate = "";
+      stubExample = movedExampleLock;
+      rc = 0;
+      wants = [
+        "examples/integration: its lock resolves to ${fixtureName}; not relocked"
+        "examples/library: 1 node(s) moved"
+      ];
+      forbids = [
+        "examples/library: its lock resolves"
+        "REFUSED"
+      ];
+      locks = "any";
+      unchangedFiles = [ "examples/integration/flake.lock" ];
+      changedFiles = [ "examples/library/flake.lock" ];
+    }
+    {
+      # The PRODUCED scan: a bump that pulls this repository into a clean example's lock (the hub-tip
+      # shape, gen-inspect/fleet) is restored and named. An incoming scan alone passes it.
+      label = "an-example-bump-resolving-to-this-repository-is-restored-by-name";
+      fixture = "examples";
+      args = [ ];
+      stubUpdate = "";
+      stubExample = selfBumpedExampleLock;
+      rc = 0;
+      wants = [
+        "examples/library: this relock would have resolved its lock to ${fixtureName}; RESTORED, not relocked"
+      ];
+      forbids = [ "REFUSED —" ];
+      locks = "unchanged";
+    }
+    {
       # `--help` must not depend on a lock being well-formed, which is why it is handled before
       # anything is read. Held on the fixture whose lock is a refusal.
       label = "help-does-not-depend-on-the-lock";
@@ -693,8 +761,9 @@ let
   sh = lib.escapeShellArg;
 
   # The `nix` an arm with `stubUpdate` runs: `flake update … --flake <dir>` copies the staged lock
-  # into a `ci` dir when one is staged, and every other verb is refused loudly — so an arm that
-  # reached an act nobody staged fails by name instead of silently succeeding.
+  # into a `ci` dir, or the staged example lock into an `examples/<d>` dir, when one is staged, and
+  # every other verb is refused loudly — so an arm that reached an act nobody staged fails by name
+  # instead of silently succeeding.
   stubNix = pkgs.writeShellScript "nix" ''
     if [ "$1 $2" != "flake update" ]; then
       echo "stub nix: unexpected invocation: $*" >&2
@@ -703,6 +772,7 @@ let
     for a; do d=$a; done
     case "$d" in
     */ci) if [ -s "$STUB_CI_LOCK" ]; then cp "$STUB_CI_LOCK" "$d/flake.lock"; fi ;;
+    */examples/*) if [ -s "$STUB_EXAMPLE_LOCK" ]; then cp "$STUB_EXAMPLE_LOCK" "$d/flake.lock"; fi ;;
     esac
   '';
 
@@ -738,6 +808,13 @@ let
         mkdir -p "$TMP/fix/.github/workflows"
         printf '%s' ${sh f.workflow} > "$TMP/fix/.github/workflows/ci.yml"
       ''}
+      ${lib.concatStrings (
+        lib.mapAttrsToList (d: l: ''
+          mkdir -p "$TMP/fix/examples/${d}"
+          printf '%s' ${sh ciFlake} > "$TMP/fix/examples/${d}/flake.nix"
+          printf '%s' ${sh l} > "$TMP/fix/examples/${d}/flake.lock"
+        '') (f.examples or { })
+      )}
       # The pre-state, as a DIGEST MANIFEST rather than a file comparison: a command that writes and
       # then restores returns the bytes it started with, and only a digest taken around the whole
       # invocation can tell "never written" from "written and put back". Both readings matter here,
@@ -765,11 +842,12 @@ let
       ${lib.optionalString (arm ? stubUpdate) ''
         rm -rf "$TMP/stub" && mkdir -p "$TMP/stub"
         printf '%s' ${sh arm.stubUpdate} > "$TMP/stub/ci.lock"
+        printf '%s' ${sh (arm.stubExample or "")} > "$TMP/stub/example.lock"
         ln -s ${stubNix} "$TMP/stub/nix"
         armPath=$TMP/stub:$PATH
       ''}
       rc=0
-      PATH=$armPath STUB_CI_LOCK="$TMP/stub/ci.lock" FLAKE_ROOT="${arm.flakeRoot or "$TMP/fix"}" ${relock}/bin/${fixtureName}-relock ${
+      PATH=$armPath STUB_CI_LOCK="$TMP/stub/ci.lock" STUB_EXAMPLE_LOCK="$TMP/stub/example.lock" FLAKE_ROOT="${arm.flakeRoot or "$TMP/fix"}" ${relock}/bin/${fixtureName}-relock ${
         lib.concatMapStringsSep " " sh arm.args
       } > "$TMP/out" 2>&1 || rc=$?
 
@@ -792,6 +870,16 @@ let
           fail ${sh arm.label} "the caller workflow does not name ${arm.workflowHas}"
         fi
       ''}
+      ${lib.concatMapStrings (f: ''
+        if [ "$(grep -F -- ${sh "  ./${f}"} "$TMP/pre.md5")" != "$(cd "$TMP/fix" && md5sum ${sh "./${f}"})" ]; then
+          fail ${sh arm.label} "${f} was written, and this arm leaves it byte-unchanged"
+        fi
+      '') (arm.unchangedFiles or [ ])}
+      ${lib.concatMapStrings (f: ''
+        if [ "$(grep -F -- ${sh "  ./${f}"} "$TMP/pre.md5")" = "$(cd "$TMP/fix" && md5sum ${sh "./${f}"})" ]; then
+          fail ${sh arm.label} "${f} is byte-unchanged, and this arm bumps it"
+        fi
+      '') (arm.changedFiles or [ ])}
       ${lib.optionalString (arm.noRootLockCreated or false) ''
         if [ -e "$TMP/fix/flake.lock" ]; then
           fail ${sh arm.label} "a root flake.lock was created; this shape legitimately has none"

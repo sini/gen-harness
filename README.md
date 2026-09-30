@@ -160,8 +160,10 @@ evaluate.
 
 The devshell's `relock` bumps the repository's locks, root first and then `./ci`: bare `relock`
 moves every declared input to its own tip, and `relock <input>` moves one. An input that `follows`
-another is refused by name, because it moves only with what it follows. `relock --help` has the
-rest.
+another is refused by name, because it moves only with what it follows. Each `examples/<d>/flake.lock`
+is bumped after both, unless it resolves to this repository (an integration example): that one is
+skipped and named, and a bump that would make it resolve here is restored and named. `relock --help`
+has the rest.
 
 `relock --hub`, which converged both locks onto the gen hub's pins, is retired and now refused as an
 unknown option. Every lock is meant to point at the latest revision, so there is nothing to converge

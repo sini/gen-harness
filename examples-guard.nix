@@ -1,12 +1,12 @@
 # The EXAMPLES GUARD: every directory under a member's `examples/` is evaluated by that member's own
 # suite, against its working tree.
 #
-# WHY. Each `examples/<x>/` is a flake with its own lock, pinning a published copy of the library it
-# documents. Nothing that gates the member evaluates it, so an example rots against the library and
-# every gate stays green: measured, gen-algebra's demo red at tip with its `ci` at 165/165. The member
-# declares each example's VALUE in `gen.ci.examples` — the usual value is the example's `outputs`
-# applied to the suite's own library values — so the tree under test is the tree the example runs on,
-# and no example lock is read.
+# WHY. Each `examples/<x>/` is a flake with its own lock. Nothing that gates the member evaluates it,
+# so an example rots against the library and every gate stays green: measured, gen-algebra's demo red
+# at tip with its `ci` at 165/165. The member declares each example's VALUE in `gen.ci.examples` — the
+# usual value is the example's `outputs` applied to `nixpkgs.lib` alone, since a library example binds
+# its parent as `import ../.. { }` (den-hoag-eu9do) — so the tree under test is the tree the example
+# runs on, and no example lock is read.
 #
 # ★ THREE CELLS, BECAUSE EACH CATCHES WHAT THE OTHER TWO PASS.
 #   · TOTALITY: the directories on disk equal the declared names plus the excluded ones. The default

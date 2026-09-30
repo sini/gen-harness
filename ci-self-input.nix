@@ -11,6 +11,11 @@
 # THE RULING IT ENCODES (owner, 2026-09-18): "for internal coherence the ci → root will always
 # diverge — and because of that ci in a module should always override its self-input", disambiguated
 # to the arm above. Spec: den-ag-design `specs/2026-09-18-gen-harness-relock-command-spec.md` §2.2.
+# Its DOMAIN IS ci AND examples (owner, 2026-09-30, den-hoag-eu9do arm a″): a LIBRARY example binds
+# its parent as `import ../.. { }` and its lock pins no copy of this repository, and `relock` runs
+# this scanner over each `examples/<d>/flake.lock` before and after its bump, skipping (by name) a
+# lock that resolves here. The check below still reads the ci and root locks only; an example-plane
+# gate is deferred. Spec: den-ag-design `specs/2026-09-29-gen-examples-locks-spec.md` §2.4, §4 OQ1.
 #
 # WHY. A `ci/` that pins its own repository from a forge puts TWO IDENTITY FORMULAS FOR ONE NODE in
 # a single evaluation — the working tree under test, and some published revision of it — and every

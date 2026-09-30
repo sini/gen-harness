@@ -75,6 +75,10 @@ pkgs.writeShellApplication {
         "A workflow calling gen-harness's evaluators.yml@<sha> is rewritten to the locked rev" \
         "on every run that is not refused." \
         "" \
+        "Each examples/<d>/flake.lock is relocked after both, unless it resolves to this" \
+        "repository (an integration example): that one is named and skipped, and a bump that" \
+        "would make it resolve here is restored and named." \
+        "" \
         "relock --hub is RETIRED (it pinned inputs to the hub's revisions). Use bare relock for this" \
         "repository, and den-ag-design's relock-all to move the whole gen graph to its tips." >&2
     }
@@ -227,6 +231,36 @@ pkgs.writeShellApplication {
         | .[]'
     }
 
+    # The CARRIERS of a repository in a lock: its direct inputs whose own closure resolves that
+    # repository, one per line. Used for `ci/flake.lock` and for each example lock alike.
+    carriersIn() {
+      jq -r --arg repo "$2" '
+        def repoOf($d; $n):
+          ($d.nodes[$n].locked // {}) as $l
+          | if ($l.repo // null) != null then $l.repo
+            elif ($l.type // "") == "git" and ($l.url // null) != null
+              then ($l.url | sub("\\.git$"; "") | split("/") | last)
+            else null end;
+        def closure($d; $start):
+          { seen: {}, todo: [$start] }
+          | until((.todo | length) == 0;
+              (.todo[0]) as $n
+              | .todo = .todo[1:]
+              | if (.seen[$n] // false) then .
+                else .seen[$n] = true
+                     | .todo = (.todo + [ ($d.nodes[$n].inputs // {}) | .[]
+                                          | select(type == "string") ])
+                end)
+          | (.seen | keys);
+        . as $d
+        | ($d.nodes[$d.root // "root"].inputs // {})
+        | to_entries[]
+        | select(.value | type == "string")
+        | . as $e
+        | select(closure($d; $e.value) | any(repoOf($d; .) == $repo))
+        | $e.key' "$1"
+    }
+
     # ★ WHETHER ANYTHING MOVED AT ALL, which is a different question from whether the command
     # SUCCEEDED and is the one the catch-up step at the foot of this script turns on. A run that
     # moved no node bumped no formatter and no hook, so there is nothing for that step to do —
@@ -234,10 +268,13 @@ pkgs.writeShellApplication {
     # `relock-behaviour.nix` stay hermetic.
     movedAny=no
 
+    # The fourth argument is `no` for a lock that pins neither the formatter nor the hook (an
+    # example's), so its delta is reported without arming the catch-up step at the foot.
     report() {
       label=$1
       before=$2
       after=$3
+      pinsTooling=''${4:-yes}
       if [ ! -f "$after" ]; then
         return 0
       fi
@@ -245,7 +282,7 @@ pkgs.writeShellApplication {
       if [ -z "$delta" ]; then
         printf '  %s: 0 nodes moved\n' "$label"
       else
-        movedAny=yes
+        if [ "$pinsTooling" = yes ]; then movedAny=yes; fi
         printf '  %s: %s node(s) moved\n' "$label" "$(printf '%s\n' "$delta" | wc -l)"
         printf '%s\n' "$delta"
       fi
@@ -325,6 +362,37 @@ pkgs.writeShellApplication {
       fi
     fi
 
+    # ★ THE EXAMPLES' DOMAIN IS DECIDED HERE, BEFORE ANY UPDATE, BY THE SAME SCANNER. The self-input
+    # ruling extends from ci/ to examples/ (owner, 2026-09-30, den-hoag-eu9do): a LIBRARY example
+    # binds its parent as `import ../.. { }` and its lock pins no copy of this repository, so it
+    # relocks and settles. A lock that does resolve here pins this repository at its pre-relock tip,
+    # and the commit this relock feeds moves that tip, so bumping it never settles. It is SKIPPED
+    # AND NAMED rather than refused: ADR-0037 lets an integration example take the hub, so for
+    # examples/ a self-resolving lock is a class, not a defect, and the named line prints on every
+    # run so nothing goes stale in silence. An example with no lock has never been locked, and
+    # writing its first lock is not a relock.
+    # Spec: den-ag-design `specs/2026-09-29-gen-examples-locks-spec.md` §2.4.
+    exampleDirs=()
+    for f in "$root"/examples/*/flake.nix; do
+      [ -f "$f" ] || continue
+      d=$(dirname "$f")
+      if [ ! -f "$d/flake.lock" ]; then
+        printf '  %s: no flake.lock; not relocked\n' "''${d#"$root"/}"
+        continue
+      fi
+      rc=0
+      err=$(${scanner}/bin/${name}-ci-self-input "$d/flake.lock" ${name} 2>&1) || rc=$?
+      case $rc in
+        0) exampleDirs+=("$d") ;;
+        1) printf '  %s: its lock resolves to %s; not relocked\n' "''${d#"$root"/}" ${name} ;;
+        *)
+          printf '%s: CONTROL FAILED — the self-input scanner did not run on %s (rc=%s):\n%s\n' \
+            "$self" "$d/flake.lock" "$rc" "$err" >&2
+          exit 2
+          ;;
+      esac
+    done
+
     # BACKUPS SERVE TWICE: the baseline the delta is read against, and the state restored if the
     # produced tree violates the invariant the incoming one satisfied.
     backup=$(mktemp -d)
@@ -335,6 +403,10 @@ pkgs.writeShellApplication {
     if [ -f "$ciLock" ]; then
       cp "$ciLock" "$backup/ci.json"
     fi
+    mkdir -p "$backup/examples"
+    for d in "''${exampleDirs[@]}"; do
+      cp "$d/flake.lock" "$backup/examples/$(basename "$d").json"
+    done
 
     case "$mode" in
       # NO ARGUMENT IS THE BUMP-EVERYTHING ACT, and it is spelled that way because the primitive
@@ -433,45 +505,20 @@ pkgs.writeShellApplication {
         # KNOWN LIMIT, and it is the right one: only STRING input edges are followed, never the
         # array-valued `follows` edges. A node reachable from a direct input ONLY through a
         # `follows` is not built by that input's subtree, so bumping that input would not move it.
+        repo=""
+        if [ "$inRoot" = yes ]; then
+          repo=$(jq -r --arg i "$input" '
+            . as $d
+            | ($d.nodes[$d.root // "root"].inputs[$i]) as $k
+            | ($d.nodes[$k].locked.repo // "")' "$rootLock")
+        fi
         if [ -f "$ciLock" ]; then
-          repo=""
-          if [ "$inRoot" = yes ]; then
-            repo=$(jq -r --arg i "$input" '
-              . as $d
-              | ($d.nodes[$d.root // "root"].inputs[$i]) as $k
-              | ($d.nodes[$k].locked.repo // "")' "$rootLock")
-          fi
-
           carriers=()
           if [ -n "$repo" ]; then
             # Captured, never read through `< <(…)`: a process substitution's exit is discarded,
             # so a jq failure there read as "no input carries it" and left the ci lock behind.
             rc=0
-            carrierList=$(jq -r --arg repo "$repo" '
-              def repoOf($d; $n):
-                ($d.nodes[$n].locked // {}) as $l
-                | if ($l.repo // null) != null then $l.repo
-                  elif ($l.type // "") == "git" and ($l.url // null) != null
-                    then ($l.url | sub("\\.git$"; "") | split("/") | last)
-                  else null end;
-              def closure($d; $start):
-                { seen: {}, todo: [$start] }
-                | until((.todo | length) == 0;
-                    (.todo[0]) as $n
-                    | .todo = .todo[1:]
-                    | if (.seen[$n] // false) then .
-                      else .seen[$n] = true
-                           | .todo = (.todo + [ ($d.nodes[$n].inputs // {}) | .[]
-                                                | select(type == "string") ])
-                      end)
-                | (.seen | keys);
-              . as $d
-              | ($d.nodes[$d.root // "root"].inputs // {})
-              | to_entries[]
-              | select(.value | type == "string")
-              | . as $e
-              | select(closure($d; $e.value) | any(repoOf($d; .) == $repo))
-              | $e.key' "$ciLock") || rc=$?
+            carrierList=$(carriersIn "$ciLock" "$repo") || rc=$?
             if [ "$rc" -ne 0 ]; then
               printf '%s\n' \
                 "$self: CONTROL FAILED — ci/flake.lock could not be read to find what carries $repo" \
@@ -536,6 +583,60 @@ pkgs.writeShellApplication {
         exit 1
       fi
     fi
+
+    # ★ THE EXAMPLES, AFTER THE ROOT AND ci HAVE PASSED THEIR PRODUCED-TREE CHECK, so a refusal there
+    # has already restored and exited with no example touched. Bare mode bumps every input of each
+    # example in the domain decided above; `relock <input>` bumps what carries it, traced as for ci.
+    # ★ THE PRODUCED LOCK IS SCANNED TOO: an example pinning the hub can resolve here only in the lock
+    # a bump WRITES (the hub's tip pins this repository while the incoming pin predates it), so an
+    # incoming scan alone passes it. Such a lock is RESTORED and named, the same skip as above.
+    # An example's delta is reported and does not arm the catch-up below: `ci/flake.lock` alone
+    # pins the formatter and the hook.
+    for d in "''${exampleDirs[@]}"; do
+      rel=''${d#"$root"/}
+      el=$d/flake.lock
+      eb=$backup/examples/$(basename "$d").json
+      if [ -z "$mode" ]; then
+        nix flake update --flake "$d"
+      else
+        ecarriers=()
+        if [ -n "$repo" ]; then
+          rc=0
+          carrierList=$(carriersIn "$el" "$repo") || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            printf '%s: CONTROL FAILED — %s could not be read to find what carries %s (jq rc=%s).\n' \
+              "$self" "$el" "$repo" "$rc" >&2
+            exit 2
+          fi
+          if [ -n "$carrierList" ]; then
+            mapfile -t ecarriers <<< "$carrierList"
+          fi
+        elif hasInput "$el" "$input"; then
+          ecarriers=("$input")
+        fi
+        if [ ''${#ecarriers[@]} -eq 0 ]; then
+          printf '  %s: no input carries %s; left alone.\n' "$rel" "''${repo:-$input}"
+        fi
+        for c in "''${ecarriers[@]}"; do
+          nix flake update "$c" --flake "$d"
+        done
+      fi
+      rc=0
+      err=$(${scanner}/bin/${name}-ci-self-input "$el" ${name} 2>&1) || rc=$?
+      case $rc in
+        0) report "$rel" "$eb" "$el" no ;;
+        1)
+          cp "$eb" "$el"
+          printf '  %s: this relock would have resolved its lock to %s; RESTORED, not relocked\n' \
+            "$rel" ${name}
+          ;;
+        *)
+          printf '%s: CONTROL FAILED — the self-input scanner did not run on %s (rc=%s); it is LEFT AS WRITTEN:\n%s\n' \
+            "$self" "$el" "$rc" "$err" >&2
+          exit 2
+          ;;
+      esac
+    done
 
     # ★ A CALLER'S WORKFLOW REF FOLLOWS THE LOCK, AND ONLY FROM HERE. A member calling gen-harness's
     # three-evaluator workflow names it `evaluators.yml@<sha>`, and that sha must be the gen-harness
@@ -629,9 +730,9 @@ pkgs.writeShellApplication {
       # what the formatter wrote: on a tree that was already dirty those are not the same set, and
       # this command has no standing to claim the narrower one.
       if git -C "$root" rev-parse --git-dir > /dev/null 2>&1; then
-        printf '%s: tracked files git now reports MODIFIED, the two locks excluded:\n' "$self"
+        printf '%s: tracked files git now reports MODIFIED, the locks excluded:\n' "$self"
         git -C "$root" status --porcelain --untracked-files=no -- \
-          . ':(exclude)flake.lock' ':(exclude)ci/flake.lock'
+          . ':(exclude)flake.lock' ':(exclude)ci/flake.lock' ':(exclude)examples/*/flake.lock'
       fi
     fi
   '';
