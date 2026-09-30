@@ -52,6 +52,7 @@ let
   examplesSuite = (import ./examples-guard.nix { inherit lib; }).cells {
     root = inputs.self.sourceInfo.outPath;
     declared = config.gen.ci.examples;
+    excluded = config.gen.ci.examplesExcluded;
   };
 
   # KNOWN LIMIT, and it belongs to this gate rather than to the suites it reads: `expr` is forced
@@ -213,6 +214,35 @@ in
       adopted the guard yet and gets no suite, so a bare harness bump reds no consumer; any
       declaration, `{ }` included, arms the suite. A later harness revision makes `{ }` the
       default and drops `null`, after which no value switches the suite off.
+    '';
+  };
+
+  # The examples the guard does NOT evaluate, each by name and citing the row that tracks it
+  # (den-hoag-qaa7o: the integration examples whose closure contains the member, until den-hoag-tyu25).
+  options.gen.ci.examplesExcluded = lib.mkOption {
+    type = lib.types.attrsOf (
+      lib.types.submodule {
+        options = {
+          row = lib.mkOption {
+            type = lib.types.str;
+            default = "";
+            description = "The tracking row that owes this example's evaluation. Blank is refused.";
+          };
+          reason = lib.mkOption {
+            type = lib.types.str;
+            default = "";
+            description = "Why the suite cannot evaluate the example. Blank is refused.";
+          };
+        };
+      }
+    );
+    default = { };
+    description = ''
+      Directories under `examples/` the guard does not evaluate: `<dir> = { row; reason; }`. Each is
+      counted by the totality cell and gets one cell, `test-<dir>-excluded-citing-<row>`, so every
+      run lists it with its row. That cell reds on a blank `row` or `reason`, on a `<dir>` that is not
+      a directory under `examples/`, and on a `<dir>` also declared in `gen.ci.examples`. Any entry
+      arms the suite, as a declaration does.
     '';
   };
 

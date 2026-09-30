@@ -153,6 +153,102 @@ in
       expected = [ "tests.test-no-throw" ];
     };
 
+    # An exclusion is counted by totality, skipped by force and leaves, and listed by a cell whose
+    # name carries its row. The control is the same exclusion with its directory undeclared.
+    test-an-excluded-directory-is-skipped-and-listed-with-its-row = {
+      expr = lib.mapAttrs (_: holds) (
+        guard.cells {
+          root = clean;
+          declared.alpha = { };
+          excluded.beta = {
+            row = "den-hoag-tyu25";
+            reason = "its closure contains the member";
+          };
+        }
+      );
+      expected = {
+        test-every-example-directory-is-declared = true;
+        test-alpha-forces-under-deepSeq = true;
+        test-alpha-every-leaf-holds = true;
+        test-beta-excluded-citing-den-hoag-tyu25 = true;
+      };
+    };
+    test-control-without-the-exclusion-the-directory-reds-totality = {
+      expr = holds (suite { alpha = { }; }).test-every-example-directory-is-declared;
+      expected = false;
+    };
+
+    test-an-exclusion-with-no-row-is-refused = {
+      expr =
+        (guard.cells {
+          root = clean;
+          declared.alpha = { };
+          excluded.beta.reason = "its closure contains the member";
+        }).test-beta-excluded-citing-no-row.expr;
+      expected = [ "names no tracking row" ];
+    };
+
+    test-an-exclusion-naming-a-missing-directory-is-refused = {
+      expr =
+        (guard.cells {
+          root = clean;
+          declared = {
+            alpha = { };
+            beta = { };
+          };
+          excluded.gamma = {
+            row = "den-hoag-tyu25";
+            reason = "stale";
+          };
+        }).test-gamma-excluded-citing-den-hoag-tyu25.expr;
+      expected = [ "examples/gamma is not a directory on disk" ];
+    };
+
+    test-an-exclusion-duplicating-a-declaration-is-refused = {
+      expr =
+        let
+          s = guard.cells {
+            root = clean;
+            declared = {
+              alpha = { };
+              beta = { };
+            };
+            excluded.beta = {
+              row = "den-hoag-tyu25";
+              reason = "both";
+            };
+          };
+        in
+        {
+          cell = s.test-beta-excluded-citing-den-hoag-tyu25.expr;
+          totality = holds s.test-every-example-directory-is-declared;
+        };
+      expected = {
+        cell = [ "is also declared in gen.ci.examples" ];
+        totality = false;
+      };
+    };
+
+    # An exclusion arms the guard as a declaration does: an unadopted `null` beside it is `{ }`.
+    test-an-exclusion-alone-arms-totality = {
+      expr =
+        (guard.cells {
+          root = clean;
+          declared = null;
+          excluded.beta = {
+            row = "den-hoag-tyu25";
+            reason = "r";
+          };
+        }).test-every-example-directory-is-declared;
+      expected = {
+        expr = [
+          "alpha"
+          "beta"
+        ];
+        expected = [ "beta" ];
+      };
+    };
+
     # `mkCi` adds `examples/` to the read roots exactly when the source carries it.
     test-the-read-root-is-added-only-where-examples-exists = {
       expr = {

@@ -9,8 +9,8 @@
 # and no example lock is read.
 #
 # ★ THREE CELLS, BECAUSE EACH CATCHES WHAT THE OTHER TWO PASS.
-#   · TOTALITY: the directories on disk equal the declared names. The default `{ }` is the invariant,
-#     so a member that says nothing about an `examples/` it carries reds; there is no exclusion arm.
+#   · TOTALITY: the directories on disk equal the declared names plus the excluded ones. The default
+#     `{ }` is the invariant, so a member that says nothing about an `examples/` it carries reds.
 #   · FORCE: `deepSeq` of the declared value. `attrNames` reads a full spine over cells that throw.
 #   · LEAVES: every nix-unit leaf `{ expr; expected; }` holds. `deepSeq` passes a leaf that
 #     disagrees without throwing — an error returned as a value is still a value.
@@ -24,6 +24,12 @@
 #
 # ★ CELL NAMES DEPEND ON THE DECLARED NAMES ONLY, never on the values, so an example that aborts takes
 # down its own cells and nothing else.
+#
+# ★ AN EXCLUSION IS BY NAME AND CITES THE ROW THAT TRACKS IT. An example that cannot be evaluated from
+# the member's own suite (its closure contains a published copy of the member) is named in `excluded`
+# with `{ row; reason; }`, and gets one cell whose NAME carries the row, so every run lists it. The
+# cell reds on a blank row or reason, on a directory that is not on disk (a stale exclusion cannot
+# outlive its example) and on a name that is also declared.
 { lib }:
 let
   isLeaf = v: builtins.isAttrs v && v ? expr && (v ? expected || v ? expectedError);
@@ -58,27 +64,50 @@ in
   # the totality cell: a never-committed example, not a published one rotting.
   readRoot = root: lib.optional (builtins.pathExists (root + "/examples")) (root + "/examples");
 
-  # `{ root, declared }` -> the `gen-ci-examples` suite, `{ }` when there is nothing to hold.
-  # `declared = null` is a consumer that has not adopted the guard: no suite.
+  # `{ root, declared, excluded }` -> the `gen-ci-examples` suite, `{ }` when there is nothing to
+  # hold. `declared = null` with nothing excluded is a consumer that has not adopted the guard: no
+  # suite. Any exclusion arms it, as any declaration does.
   cells =
-    { root, declared }:
-    if declared == null then
+    {
+      root,
+      declared,
+      excluded ? { },
+    }:
+    if declared == null && excluded == { } then
       { }
     else
       let
+        declared' = if declared == null then { } else declared;
         dir = root + "/examples";
         present = builtins.pathExists dir;
         onDisk = lib.optionals present (
           builtins.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir dir))
         );
+        blank = s: builtins.match "[[:space:]]*" s != null;
       in
-      lib.optionalAttrs (present || declared != { }) (
+      lib.optionalAttrs (present || declared' != { } || excluded != { }) (
         {
           test-every-example-directory-is-declared = {
             expr = onDisk;
-            expected = builtins.attrNames declared;
+            expected = lib.sort lib.lessThan (builtins.attrNames declared' ++ builtins.attrNames excluded);
           };
         }
+        // lib.concatMapAttrs (
+          n: e:
+          let
+            row = e.row or "";
+          in
+          {
+            "test-${n}-excluded-citing-${if blank row then "no-row" else row}" = {
+              expr =
+                lib.optional (blank row) "names no tracking row"
+                ++ lib.optional (blank (e.reason or "")) "states no reason"
+                ++ lib.optional (!builtins.elem n onDisk) "examples/${n} is not a directory on disk"
+                ++ lib.optional (declared' ? ${n}) "is also declared in gen.ci.examples";
+              expected = [ ];
+            };
+          }
+        ) excluded
         // lib.concatMapAttrs (n: v: {
           "test-${n}-forces-under-deepSeq" = {
             expr = builtins.deepSeq (strip v) "forced";
@@ -88,6 +117,6 @@ in
             expr = map lib.showAttrPath (failing [ ] v);
             expected = [ ];
           };
-        }) declared
+        }) declared'
       );
 }

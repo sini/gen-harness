@@ -87,11 +87,23 @@ The generated suite `tests.gen-ci-examples` holds three things: the declared nam
 directories on disk (so an undeclared example reds), each value forces under `deepSeq`, and every
 nix-unit leaf inside it holds (`expected` equal, `expectedError` throwing; the error's message is
 not checked). An example that cannot be evaluated from the member's own suite without reaching a
-published copy of the member has no declaration that can satisfy the totality cell.
+published copy of the member is excluded by name instead, citing the row that tracks it:
+
+```nix
+gen.ci.examplesExcluded.demo = {
+  row = "den-hoag-tyu25";
+  reason = "its flake takes the hub, which pins this repository";
+};
+```
+
+The totality cell counts it, the force and leaves cells skip it, and it gets one cell of its own,
+`test-demo-excluded-citing-den-hoag-tyu25`, so every run lists it with its row. That cell reds on a
+blank `row` or `reason`, on a directory that is not on disk, and on a name also declared in
+`gen.ci.examples`.
 
 The suite is adopted per consumer. The option defaults to `null`, meaning not yet adopted, and a
 consumer at that default gets no suite, so bumping the harness reds nobody. Any declaration arms
-it, `gen.ci.examples = { };` included, and from then on every directory under `examples/` must be
+it, `gen.ci.examples = { };` or any exclusion included, and from then on every directory under `examples/` must be
 declared. Once every consumer has declared, a later harness revision makes `{ }` the default and
 removes `null`, so the suite can no longer be switched off; a consumer with an undeclared
 `examples/` directory then reds at its harness bump.
