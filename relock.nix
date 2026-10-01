@@ -60,6 +60,7 @@ pkgs.writeShellApplication {
     pkgs.gnused
     pkgs.gnutar
     pkgs.diffutils
+    pkgs.gawk
   ];
   text = ''
     self=${name}-relock
@@ -876,7 +877,9 @@ pkgs.writeShellApplication {
           else
             red=$((red + 1))
             printf '  examples/%s: %s does not hold (rc=%s, holds=%s)\n' "$n" "$c" "$rc" "''${out:-none}" >&2
-            sed -n '/error:/,$p' "$scratch/.cell.err" | head -n 8 | sed 's/^/    /' >&2
+            # From the LAST `error:` on: nix nests the innermost message there, beneath the trace.
+            awk '/error:/ { buf = "" } { buf = buf $0 "\n" } END { printf "%s", buf }' "$scratch/.cell.err" \
+              | head -n 6 | sed 's/^/    /' >&2
           fi
         done
         if [ "$held" -eq "''${#cells[@]}" ]; then
