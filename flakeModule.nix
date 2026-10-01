@@ -129,18 +129,22 @@ in
   # The consumer's DECLARED SHEET OBLIGATION. The default is the invariant -- a consumer that
   # says nothing owes a sheet and is refused without one -- so absence yields the refusing arm,
   # never its negation. "not-owed" is a positive declaration the check reads and holds the tree
-  # to: a sheet present beside it is refused as a contradiction. There is no value that turns
-  # the check off over a sheet that exists.
+  # to: a sheet present beside it is refused as a contradiction. "instructions" names the root
+  # file's ROLE -- agent instructions, not a capability sheet -- and is refused when no such file
+  # is present. There is no value that turns the check off over a tree that says nothing.
   options.gen.ci.agentsMd.sheet = lib.mkOption {
     type = lib.types.enum [
       "owed"
       "not-owed"
+      "instructions"
     ];
     default = "owed";
     description = ''
       Whether this repository owes an AGENTS.md capability sheet. `owed`: a non-empty sheet
       with a passing citation region is required. `not-owed`: no entry named AGENTS.md may
-      exist at the repository root, and that declaration is the check's subject. Declare it in
+      exist at the repository root, and that declaration is the check's subject. `instructions`:
+      the root AGENTS.md is an agent-instructions file, not a capability sheet; it must exist
+      non-empty and no citation region is read from it. Declare it in
       the same commit as the harness bump that brings this option: a declaration ahead of its
       bump is an undefined option and fails every output of this ci at evaluation, `tests` too.
     '';

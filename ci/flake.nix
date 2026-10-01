@@ -96,11 +96,13 @@
       # `expr`/`expected` pair can express, and three of them are verdicts of the column's own
       # evaluator, so they run as a program under `ci --tests-process`, never as a check.
       # `process-plane-guard.nix` adds a flake CHECK: the `ci --tests-process` closure guard's exit
-      # codes and messages over real fixture closures.
+      # codes and messages over real fixture closures. `agents-md-sheet-arms.nix` adds a flake CHECK
+      # too: `agents-md-citations`'s declaration arms, run as the shipped builder over fixture roots.
       extraModules = [
         ./tests-error.nix
         ./tests-process.nix
         ./process-plane-guard.nix
+        ./agents-md-sheet-arms.nix
         # The harness publishes no root `default.nix`; its surface is the flake's `lib`.
         { gen.ci.rootSurface.entry = "not-owed"; }
       ];

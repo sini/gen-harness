@@ -138,6 +138,21 @@ in
       } "root-surface: `entry` must be \"owed\" or \"not-owed\"";
     };
 
+    # `checks.agents-md-citations`' declaration door: a value outside the three is refused at
+    # evaluation, by name. The arms the builder decides are `agents-md-sheet-arms.nix`.
+    flake.testsError.agents-md-citations.test-an-undeclared-sheet-value-is-refused = {
+      expr = inputs.gen-harness.lib.checks.agentsMdCitations {
+        pkgs = { };
+        name = "fx";
+        root = ./.;
+        sheet = "instruction";
+      };
+      expectedError = {
+        type = "ThrownError";
+        msg = lib.escapeRegex "agents-md-citations: `sheet` must be \"owed\", \"not-owed\" or \"instructions\"; got \"instruction\"";
+      };
+    };
+
     # The flake module's generated tombstone suite, over the fixture: the message is the one the
     # root throws, so the cell PASSES; resurrecting `gone` to throw anything else fails it.
     flake.testsError.root-surface-retired-fixture = (import ../root-surface.nix).retiredCells {

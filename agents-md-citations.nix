@@ -100,8 +100,10 @@
   # the invariant: absence of a declaration yields the refusing arm) means a non-empty AGENTS.md
   # must exist and its region must pass; "not-owed" means NO entry named AGENTS.md may exist at
   # the repository root (a file empty or not, a symlink live or dangling, a directory), and the
-  # check reads that declaration as its subject. There is no third value and no silent arm: a
-  # declaration the tree contradicts is refused in both directions.
+  # check reads that declaration as its subject; "instructions" means the root AGENTS.md is an
+  # agent-INSTRUCTIONS file, not a capability sheet, so it must exist non-empty and is not read
+  # for a region. There is no fourth value and no silent arm: a declaration the tree contradicts
+  # is refused in every direction.
   sheet ? "owed",
 }:
 let
@@ -607,10 +609,16 @@ let
     }
   '';
 in
-# A third value is refused at EVALUATION, before any derivation exists: the direct route has no
+# Any other value is refused at EVALUATION, before any derivation exists: the direct route has no
 # module type in front of it, so the builder states the admitted values itself.
-if sheet != "owed" && sheet != "not-owed" then
-  throw "agents-md-citations: `sheet` must be \"owed\" or \"not-owed\"; got ${builtins.toJSON sheet}"
+if
+  !builtins.elem sheet [
+    "owed"
+    "not-owed"
+    "instructions"
+  ]
+then
+  throw "agents-md-citations: `sheet` must be \"owed\", \"not-owed\" or \"instructions\"; got ${builtins.toJSON sheet}"
 else
   pkgs.runCommand "${name}-agents-md-citations"
     {
@@ -628,10 +636,24 @@ else
         # as absent; it is still an entry in the tree, so -L is the second arm.
         if [ -e "$sheet" ] || [ -L "$sheet" ]; then
           echo "CONTROL FAILED: the consumer declares its AGENTS.md sheet not-owed, yet $sheet exists; the declaration and the tree contradict each other." >&2
-          echo "Either delete the sheet, or drop the not-owed declaration (gen.ci.agentsMd.sheet for an mkCi consumer; the sheet argument for a direct consumer)." >&2
+          echo "Either delete the sheet, drop the not-owed declaration, or -- if the file is agent instructions and not a capability sheet -- declare it \"instructions\" (gen.ci.agentsMd.sheet for an mkCi consumer; the sheet argument for a direct consumer)." >&2
           exit 1
         fi
         echo "sheet declared not-owed and none is present; the check's subject here is that declaration, and it holds."
+        touch $out
+        exit 0
+      fi
+
+      # An instructions declaration names the file's ROLE: present, and not a sheet, so no region is
+      # required and no citation is read. Absent or empty, the declaration names nothing and is
+      # refused, the same contradiction as not-owed in the other direction.
+      if [ "$sheetDeclared" = instructions ]; then
+        if [ ! -s "$sheet" ]; then
+          echo "CONTROL FAILED: the consumer declares its AGENTS.md an instructions file, yet no non-empty AGENTS.md is at $sheet; the declaration and the tree contradict each other." >&2
+          echo "Either write the instructions file, or declare not-owed (gen.ci.agentsMd.sheet for an mkCi consumer; the sheet argument for a direct consumer)." >&2
+          exit 1
+        fi
+        echo "AGENTS.md declared an instructions file and it is present; it is not a capability sheet, so no citation region is read."
         touch $out
         exit 0
       fi

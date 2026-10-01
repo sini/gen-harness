@@ -55,7 +55,10 @@ A test module sets `flake.tests.<suite>.<name> = { expr; expected; };` and recei
 read domain below). A consumer that owes no `AGENTS.md` capability sheet declares it
 through `extraModules` as `{ gen.ci.agentsMd.sheet = "not-owed"; }`; the `agents-md-citations`
 check then holds the tree to that declaration and refuses a sheet present beside it, while a
-consumer that declares nothing owes a sheet and is refused without one.
+consumer that declares nothing owes a sheet and is refused without one. A consumer whose root
+`AGENTS.md` is agent instructions rather than a capability sheet declares
+`{ gen.ci.agentsMd.sheet = "instructions"; }`: the file must be present and non-empty, and no
+citation region is read from it.
 
 `checks.root-surface` holds a repository's root `default.nix` the same way. By default it is owed:
 the root is applied at its own declared point (`import <root> { }`, or the root itself when it is a
