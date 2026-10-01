@@ -70,6 +70,11 @@
 # The live acts are exercised by the owner running the command, which is where all three defects
 # came from and remains the acceptance.
 #
+# ★ THE INTEGRATION STEP'S ARMS DO RUN THE EVALUATOR'S ACTS, offline: `nix flake lock` over an
+# example whose one input is an absolute `path:` outside the tree, and `nix eval` of a `path:` copy,
+# both against the relocated store with no network route. Their fixtures are git worktrees, because
+# the step classifies by `git check-ignore` and copies by `git ls-files`.
+#
 # THE FIXTURE SET SPANS THE SHAPES, WHICH IS THE POINT AND NOT THE ARM COUNT. Defects 2 and 3 were
 # invisible partly because every fixture in play was copied from a member that HAS a root lock: a
 # set derived from one shape tests that shape N times. These are synthetic and disjoint from every
@@ -232,6 +237,39 @@ let
 
   zeroInputFlake = "{ outputs = _: { }; }";
 
+  # ── THE INTEGRATION SHAPE (den-hoag-tyu25). A git worktree whose root `.gitignore` names
+  # `examples/e/flake.lock`, and no lock there. The example takes one `flake = false` input at an
+  # absolute path outside the tree (`@FIXDATA@`, filled in by the fixture), so `nix flake lock`
+  # writes a lock offline: an input-less flake gets no lock at all. The ci flake states
+  # `examplesAtRelock` by hand rather than through the harness, so the arms drive the STEP; the
+  # graft and the cells are `tests.example-graft` and `tests.examples-guard`. The green cell reads
+  # the fresh lock from the evaluated source, which is what `path:` carries and `git+file:` drops.
+  integrationExample = ''
+    {
+      inputs.data = {
+        url = "path:@FIXDATA@";
+        flake = false;
+      };
+      outputs = _: { };
+    }
+  '';
+  integrationCi = cell: ''
+    {
+      outputs = { self }: {
+        examplesAtRelock = ${cell};
+      };
+    }
+  '';
+  integrationFixture = cell: {
+    rootLock = null;
+    ciLock = null;
+    flake = zeroInputFlake;
+    git = true;
+    gitignore = "/examples/e/flake.lock\n";
+    ciFlake = integrationCi cell;
+    integration.e = integrationExample;
+  };
+
   # ★ EVERY FIXTURE CARRIES A `ci/flake.nix`, because every mkCi member does and a fixture without
   # one encodes a state no member can be in — WITH ONE NAMED EXCEPTION (`neither-flake`, below,
   # `hasCiFlake = false`): den-hoag-qxve8's refusal-by-name arm needs exactly the state no member is
@@ -337,6 +375,24 @@ let
         library = cleanExampleLock;
       };
     };
+    integration-green = integrationFixture ''
+      {
+        e.test-e-reads-its-fresh-lock = {
+          expr = builtins.pathExists (self.sourceInfo.outPath + "/examples/e/flake.lock");
+          expected = true;
+        };
+      }
+    '';
+    integration-red = integrationFixture ''
+      {
+        e.test-e-drifted = {
+          expr = throw "the example drifted from the library";
+          expected = true;
+        };
+      }
+    '';
+    # The `.gitignore` line with no declaration: nothing would force the example.
+    integration-undeclared = integrationFixture "{ }";
     # WELL-FORMED down to its root node, whose `inputs` is not a set: it passes the readability
     # gate and reaches `hasInput`, whose `has` then fails — the site behind the gate.
     root-inputs-not-a-set = {
@@ -746,6 +802,68 @@ let
       locks = "unchanged";
     }
     {
+      # ★ den-hoag-tyu25, THE INTEGRATION STEP. An example whose lock git ignores is locked fresh in
+      # a scratch copy and its cells evaluated there; the eu9do loop never touches it. TWO PASSES
+      # WITH A COMMIT BETWEEN THEM, and each leaves git's view of the tree (ignored files included)
+      # and HEAD as it found them: the step settles because it writes nothing.
+      label = "an-integration-example-is-locked-fresh-and-its-cells-hold-over-two-passes";
+      fixture = "integration-green";
+      args = [ ];
+      passes = 2;
+      rc = 0;
+      wants = [
+        "examples/e: integration example, locked fresh, 1 cells hold over the working tree"
+      ];
+      forbids = [
+        "INTEGRATION-RED"
+        "examples/e: no flake.lock; not relocked"
+        "CONTROL FAILED"
+      ];
+      locks = "any";
+      gitUnchanged = true;
+      absentFiles = [ "examples/e/flake.lock" ];
+    }
+    {
+      # The forcing function: a cell that does not hold prints the token relock-all matches and
+      # exits 4, with its first error.
+      label = "a-red-integration-cell-prints-the-token-and-exits-4";
+      fixture = "integration-red";
+      args = [ ];
+      rc = 4;
+      wants = [
+        "INTEGRATION-RED: 1 of 1 integration-example cells do not hold"
+        "examples/e: test-e-drifted does not hold"
+        "the example drifted from the library"
+      ];
+      forbids = [ "cells hold over the working tree" ];
+      locks = "any";
+      gitUnchanged = true;
+    }
+    {
+      label = "an-ignored-example-lock-with-no-declaration-is-a-control-failure";
+      fixture = "integration-undeclared";
+      args = [ ];
+      rc = 2;
+      wants = [
+        "the integration examples git ignores and the ones ci declares"
+        "through exampleAtOwnLock differ"
+      ];
+      forbids = [ "INTEGRATION-RED" ];
+      locks = "any";
+      gitUnchanged = true;
+    }
+    {
+      # The produced check, driven: a `nix` whose `flake lock` also writes into the worktree.
+      label = "an-integration-step-that-writes-the-tree-is-a-control-failure";
+      fixture = "integration-green";
+      args = [ ];
+      writeTree = true;
+      rc = 2;
+      wants = [ "the integration step changed the working tree, which it never writes" ];
+      forbids = [ "cells hold over the working tree" ];
+      locks = "any";
+    }
+    {
       # `--help` must not depend on a lock being well-formed, which is why it is handled before
       # anything is read. Held on the fixture whose lock is a refusal.
       label = "help-does-not-depend-on-the-lock";
@@ -791,7 +909,7 @@ let
       ''}
       ${lib.optionalString (f.hasCiFlake or true) ''
         cat > "$TMP/fix/ci/flake.nix" <<'FIXTURE_CI_FLAKE'
-        ${ciFlake}
+        ${f.ciFlake or ciFlake}
         FIXTURE_CI_FLAKE
       ''}
       ${lib.optionalString (f.rootLock != null) ''
@@ -815,11 +933,26 @@ let
           printf '%s' ${sh l} > "$TMP/fix/examples/${d}/flake.lock"
         '') (f.examples or { })
       )}
+      ${lib.concatStrings (
+        lib.mapAttrsToList (d: text: ''
+          mkdir -p "$TMP/fix/examples/${d}" "$TMP/fixdata"
+          printf 'data\n' > "$TMP/fixdata/f"
+          printf '%s' ${sh text} | sed "s#@FIXDATA@#$TMP/fixdata#" > "$TMP/fix/examples/${d}/flake.nix"
+        '') (f.integration or { })
+      )}
+      ${lib.optionalString (f ? gitignore) ''
+        printf ${sh f.gitignore} > "$TMP/fix/.gitignore"
+      ''}
+      ${lib.optionalString (f.git or false) ''
+        git -C "$TMP/fix" init -q
+        git -C "$TMP/fix" add -A
+        git -C "$TMP/fix" commit -qm fixture
+      ''}
       # The pre-state, as a DIGEST MANIFEST rather than a file comparison: a command that writes and
       # then restores returns the bytes it started with, and only a digest taken around the whole
       # invocation can tell "never written" from "written and put back". Both readings matter here,
       # but they are different claims and this cell makes the first one.
-      ( cd "$TMP/fix" && find . -type f | sort | xargs md5sum ) > "$TMP/pre.md5"
+      ( cd "$TMP/fix" && find . -path ./.git -prune -o -type f -print | sort | xargs md5sum ) > "$TMP/pre.md5"
     '';
 
   mkArm =
@@ -846,20 +979,55 @@ let
         ln -s ${stubNix} "$TMP/stub/nix"
         armPath=$TMP/stub:$PATH
       ''}
-      rc=0
-      PATH=$armPath STUB_CI_LOCK="$TMP/stub/ci.lock" STUB_EXAMPLE_LOCK="$TMP/stub/example.lock" FLAKE_ROOT="${arm.flakeRoot or "$TMP/fix"}" ${relock}/bin/${fixtureName}-relock ${
-        lib.concatMapStringsSep " " sh arm.args
-      } > "$TMP/out" 2>&1 || rc=$?
-
-      ${lib.optionalString (arm.rc != null) ''
-        if [ "$rc" -ne ${toString arm.rc} ]; then
-          fail ${sh arm.label} "expected rc=${toString arm.rc}, got rc=$rc"
-        fi
+      ${lib.optionalString (arm.writeTree or false) ''
+        rm -rf "$TMP/shim" && mkdir -p "$TMP/shim"
+        realNix=$(command -v nix)
+        printf '%s\n' '#!${pkgs.runtimeShell}' \
+          'case " $* " in *" flake lock "*) touch "$FLAKE_ROOT/written-by-the-step" ;; esac' \
+          "exec $realNix \"\$@\"" > "$TMP/shim/nix"
+        chmod +x "$TMP/shim/nix"
+        armPath=$TMP/shim:$PATH
       ''}
-      ${wantChecks}
-      ${forbidChecks}
+      # ★ A SECOND PASS, after a commit that moves HEAD, is the settling claim: the step writes
+      # nothing, so a pass after a commit is the same act again.
+      for pass in $(seq 1 ${toString (arm.passes or 1)}); do
+        if [ "$pass" -gt 1 ]; then
+          printf 'pass %s\n' "$pass" >> "$TMP/fix/README.md"
+          git -C "$TMP/fix" add README.md
+          git -C "$TMP/fix" commit -qm "between passes"
+        fi
+        ${lib.optionalString (arm.gitUnchanged or false) ''
+          gitBefore=$(git -C "$TMP/fix" status --porcelain --ignored --untracked-files=all; git -C "$TMP/fix" rev-parse HEAD)
+        ''}
+        rc=0
+        PATH=$armPath STUB_CI_LOCK="$TMP/stub/ci.lock" STUB_EXAMPLE_LOCK="$TMP/stub/example.lock" FLAKE_ROOT="${arm.flakeRoot or "$TMP/fix"}" ${relock}/bin/${fixtureName}-relock ${
+          lib.concatMapStringsSep " " sh arm.args
+        } > "$TMP/out" 2>&1 || rc=$?
+
+        ${lib.optionalString (arm.rc != null) ''
+          if [ "$rc" -ne ${toString arm.rc} ]; then
+            fail ${sh arm.label} "pass $pass: expected rc=${toString arm.rc}, got rc=$rc"
+          fi
+        ''}
+        ${wantChecks}
+        ${forbidChecks}
+        ${lib.optionalString (arm.gitUnchanged or false) ''
+          gitAfter=$(git -C "$TMP/fix" status --porcelain --ignored --untracked-files=all; git -C "$TMP/fix" rev-parse HEAD)
+          if [ "$gitBefore" != "$gitAfter" ]; then
+            fail ${sh arm.label} "pass $pass: git's view of the tree or HEAD changed, and this arm writes nothing:
+          $gitBefore
+          ---
+          $gitAfter"
+          fi
+        ''}
+      done
+      ${lib.concatMapStrings (f: ''
+        if [ -e "$TMP/fix/${f}" ]; then
+          fail ${sh arm.label} "${f} exists in the tree, and this arm never writes it"
+        fi
+      '') (arm.absentFiles or [ ])}
       ${lib.optionalString (arm.locks == "unchanged") ''
-        ( cd "$TMP/fix" && find . -type f | sort | xargs md5sum ) > "$TMP/post.md5"
+        ( cd "$TMP/fix" && find . -path ./.git -prune -o -type f -print | sort | xargs md5sum ) > "$TMP/post.md5"
         if ! diff -q "$TMP/pre.md5" "$TMP/post.md5" > /dev/null; then
           fail ${sh arm.label} "the tree changed and this arm writes nothing:
         $(diff "$TMP/pre.md5" "$TMP/post.md5" || true)"
@@ -943,6 +1111,8 @@ let
     : > "$TMP/nix-user.conf"
     unset NIX_REMOTE NIX_PATH XDG_CONFIG_HOME XDG_CONFIG_DIRS XDG_CACHE_HOME XDG_STATE_HOME XDG_DATA_HOME
     export HOME=$TMP/home GIT_CONFIG_NOSYSTEM=1
+    export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid
+    export GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
     export NIX_CONF_DIR=$TMP/nixconf NIX_USER_CONF_FILES=$TMP/nix-user.conf
     export NIX_CONFIG="experimental-features = nix-command
     show-trace = false
@@ -1002,6 +1172,7 @@ in
       pkgs.findutils
       pkgs.gnugrep
       pkgs.gnused
+      pkgs.git
     ]
   }:$PATH
   # The evaluator the arms run under, from this process and the binary they call.

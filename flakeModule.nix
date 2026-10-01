@@ -49,7 +49,8 @@ let
   rsEntry = config.gen.ci.rootSurface.entry;
   rsRetired = config.gen.ci.rootSurface.retired;
   rsForeign = config.gen.ci.rootSurface.foreign;
-  examplesSuite = (import ./examples-guard.nix { inherit lib; }).cells {
+  examplesGuard = import ./examples-guard.nix { inherit lib; };
+  examplesSuite = examplesGuard.cells {
     root = inputs.self.sourceInfo.outPath;
     declared = config.gen.ci.examples;
     excluded = config.gen.ci.examplesExcluded;
@@ -210,7 +211,13 @@ in
       on its lock. The generated `flake.tests.gen-ci-examples` suite holds that the declared names
       equal the directories on disk, that each value forces under `deepSeq`, and that every nix-unit
       leaf in it holds (`expected` equal, `expectedError` throwing). A value that emits derivations
-      declares its non-derivation outputs instead. The default `null` is a consumer that has not
+      declares its non-derivation outputs instead. An INTEGRATION example, whose flake reaches this
+      repository through another flake, is declared `exampleAtOwnLock "<dir>" (flake: <value>)`:
+      its `flake.lock` is not committed, the root `.gitignore` carries the exact line
+      `/examples/<dir>/flake.lock`, this suite holds both in the cell
+      `test-<dir>-integration-lock-is-not-committed`, and `relock` forces the value over a fresh
+      lock with every node that is this repository grafted onto the working tree
+      (`examplesAtRelock`). The default `null` is a consumer that has not
       adopted the guard yet and gets no suite, so a bare harness bump reds no consumer; any
       declaration, `{ }` included, arms the suite. A later harness revision makes `{ }` the
       default and drops `null`, after which no value switches the suite off.
@@ -248,6 +255,26 @@ in
 
   config = {
     systems = lib.systems.flakeExposed;
+
+    # `exampleAtOwnLock "<d>" (flake: <value>)` declares an INTEGRATION example: its lock is not
+    # committed, and the relock forces `select` over the example's flake grafted onto this tree
+    # (`examples-guard.nix`, `example-graft.nix`). A declaration, not a value, because the
+    # git-filtered source this suite reads holds no lock to graft.
+    _module.args.exampleAtOwnLock = examplesGuard.exampleAtOwnLock;
+
+    # The integration examples' cells, read only by `relock`'s integration step over a scratch copy
+    # that carries the fresh locks (`path:<copy>?dir=ci#examplesAtRelock`). Always present, `{ }`
+    # with nothing declared, so the step's cross-check reads a missing declaration as a named
+    # mismatch rather than as an evaluation error.
+    flake.examplesAtRelock = examplesGuard.relockCells {
+      declared = config.gen.ci.examples;
+      flakeOf =
+        dir:
+        (import ./example-graft.nix {
+          root = inputs.self.sourceInfo.outPath;
+          inherit name dir;
+        }).flake;
+    };
 
     # One error-plane cell per declared tombstone (`root-surface.nix`, `retiredCells`). Only a
     # declarer of tombstones gets the suite, and the suite is itself a declaration of the plane.

@@ -30,8 +30,20 @@
 # with `{ row; reason; }`, and gets one cell whose NAME carries the row, so every run lists it. The
 # cell reds on a blank row or reason, on a directory that is not on disk (a stale exclusion cannot
 # outlive its example) and on a name that is also declared.
+#
+# ★ AN INTEGRATION EXAMPLE IS DECLARED THROUGH `exampleAtOwnLock`, AND ITS VALUE IS FORCED AT THE
+# RELOCK, NOT HERE. Its lock is NOT COMMITTED (owner, 2026-09-30): the root `.gitignore` carries
+# the anchored line `/examples/<d>/flake.lock`, the relock regenerates the lock in a scratch copy
+# and forces the cells `relockCells` builds, over `example-graft.nix`'s graft of that fresh lock.
+# The git-filtered source this suite reads holds no such lock, so the graft cannot run here. This
+# suite holds the class instead, in one cell, `test-<d>-integration-lock-is-not-committed`, which
+# reds on a committed lock, on a `.gitignore` without the exact line (else the relock does not
+# classify the example and nothing forces it), and on a declaration naming another directory.
 { lib }:
 let
+  # The declaration `exampleAtOwnLock dir select` returns.
+  isIntegration = v: (v._type or null) == "gen-ci-integration-example";
+
   isLeaf = v: builtins.isAttrs v && v ? expr && (v ? expected || v ? expectedError);
 
   # The value with every `expectedError` leaf's `expr` removed, so `deepSeq` forces the rest.
@@ -56,8 +68,40 @@ let
       lib.concatLists (lib.mapAttrsToList (n: failing (path ++ [ n ])) v)
     else
       [ ];
+
+  # The force and leaves cells of one declared value.
+  valueCells = n: v: {
+    "test-${n}-forces-under-deepSeq" = {
+      expr = builtins.deepSeq (strip v) "forced";
+      expected = "forced";
+    };
+    "test-${n}-every-leaf-holds" = {
+      expr = map lib.showAttrPath (failing [ ] v);
+      expected = [ ];
+    };
+  };
+
+  readLines = f: if builtins.pathExists f then lib.splitString "\n" (builtins.readFile f) else [ ];
 in
 {
+  inherit isIntegration;
+
+  # `dir: select: <declaration>`, bound in `flakeModule.nix` as the module argument of that name:
+  # `gen.ci.examples.<d> = exampleAtOwnLock "<d>" (flake: <the value to force>);`.
+  exampleAtOwnLock = dir: select: {
+    _type = "gen-ci-integration-example";
+    inherit dir select;
+  };
+
+  # `{ declared, flakeOf }` -> `{ <d> = { <the force and leaves cells>; }; }` for the integration
+  # declarations, read by the relock's integration step as `examplesAtRelock`. `flakeOf dir` is the
+  # example's grafted flake. Keyed by directory, so the step's cross-check reads the directories.
+  relockCells =
+    { declared, flakeOf }:
+    lib.mapAttrs (n: v: valueCells n (v.select (flakeOf v.dir))) (
+      lib.filterAttrs (_: isIntegration) (if declared == null then { } else declared)
+    );
+
   # The read root `mkCi` adds when the evaluated source carries `examples/`, so `ci`'s git-unknown
   # refusal covers it with the same semantics as every other root, gitignored files included. An
   # `examples/` that is entirely untracked is absent from the source and gets neither this root nor
@@ -108,15 +152,24 @@ in
             };
           }
         ) excluded
-        // lib.concatMapAttrs (n: v: {
-          "test-${n}-forces-under-deepSeq" = {
-            expr = builtins.deepSeq (strip v) "forced";
-            expected = "forced";
-          };
-          "test-${n}-every-leaf-holds" = {
-            expr = map lib.showAttrPath (failing [ ] v);
-            expected = [ ];
-          };
-        }) declared'
+        // lib.concatMapAttrs (
+          n: v:
+          if isIntegration v then
+            {
+              "test-${n}-integration-lock-is-not-committed" = {
+                expr =
+                  lib.optional (builtins.pathExists (
+                    dir + "/${n}/flake.lock"
+                  )) "examples/${n}/flake.lock is committed"
+                  ++ lib.optional (
+                    !builtins.elem "/examples/${n}/flake.lock" (readLines (root + "/.gitignore"))
+                  ) "the root .gitignore lacks the exact line /examples/${n}/flake.lock"
+                  ++ lib.optional (v.dir != n) "declared as ${n} but grafts examples/${v.dir}";
+                expected = [ ];
+              };
+            }
+          else
+            valueCells n v
+        ) declared'
       );
 }

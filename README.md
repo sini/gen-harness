@@ -101,6 +101,39 @@ The totality cell counts it, the force and leaves cells skip it, and it gets one
 blank `row` or `reason`, on a directory that is not on disk, and on a name also declared in
 `gen.ci.examples`.
 
+An **integration example** reaches the member through another flake (the gen hub, or a sibling
+whose inputs pin the member), so it cannot be given the member's values directly. Its lock is not
+committed, and it is declared through the module argument `exampleAtOwnLock`, with the directory and
+a function from the example's flake to the value to force:
+
+```nix
+{ exampleAtOwnLock, ... }:
+{
+  gen.ci.examples.demo = exampleAtOwnLock "demo" (flake: { inherit (flake) docs fleet; });
+}
+```
+
+The root `.gitignore` carries one anchored line per integration example, never a glob, since a
+library example beside it keeps its committed lock:
+
+```
+/examples/demo/flake.lock
+```
+
+To move an example into this class, add the line and delete the lock with `git rm examples/demo/flake.lock`, not `git rm --cached`: a lock left on disk is ignored, and `ci` refuses
+git-unknown bytes under `examples/`, ignored ones included. Running the example's own README
+commands writes that lock again (`nix eval .#fleet` in `examples/demo` locks it), and `ci` refuses
+until it is deleted.
+
+The suite holds the class in one cell, `test-demo-integration-lock-is-not-committed`. It reds on a
+committed lock, on a `.gitignore` without the exact line (without it `relock` does not classify the
+example, and nothing would force it), and on a declaration naming another directory. The value is
+forced by `relock`, not by this suite: the git-filtered source holds no lock to evaluate. Each
+`relock` locks the example fresh in a scratch copy and forces the value over the example's flake,
+evaluated at that lock with every node that is this repository (any depth, matched as the
+`ci-self-input` scanner matches) replaced by the working tree, built from the tree's own root
+lock. The cells are the flake output `examplesAtRelock`, and `relock` reads nothing else.
+
 The suite is adopted per consumer. The option defaults to `null`, meaning not yet adopted, and a
 consumer at that default gets no suite, so bumping the harness reds nobody. Any declaration arms
 it, `gen.ci.examples = { };` or any exclusion included, and from then on every directory under `examples/` must be
@@ -161,8 +194,25 @@ evaluate.
 The devshell's `relock` bumps the repository's locks, root first and then `./ci`: bare `relock`
 moves every declared input to its own tip, and `relock <input>` moves one. An input that `follows`
 another is refused by name, because it moves only with what it follows. Each `examples/<d>/flake.lock`
-is bumped after both, unless it resolves to this repository (an integration example): that one is
-skipped and named, and a bump that would make it resolve here is restored and named. `relock --help`
+is bumped after both, unless git ignores it (an integration example, below) or it resolves to this
+repository: that one is skipped and named, and a bump that would make it resolve here is restored
+and named.
+
+Last, on every run that is not refused, `relock` runs the **integration step**. Each example whose
+`examples/<d>/flake.lock` git ignores is locked fresh in a scratch copy of the tracked tree (with
+working-tree contents), and the cells of `ci#examplesAtRelock` are evaluated there, one by one,
+from a `path:` source and with no `--impure`. The working tree is never written. Its output is a
+contract, and den-ag-design's `relock-all` matches on it:
+
+| outcome                 | output                                                                                                                                                            | exit |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| every cell holds        | `examples/<d>: integration example, locked fresh, N cells hold over the working tree` on stdout                                                                   | 0    |
+| a cell does not hold    | `examples/<d>: <cell> does not hold` and its error on stderr, then a line opening `INTEGRATION-RED:` on stderr                                                    | 4    |
+| the step cannot measure | `CONTROL FAILED` on stderr: an example that cannot be locked, unreadable cells, an ignored set that differs from the declared one, or a working tree that changed | 2    |
+
+Exit 4 is the step's own code. The locks are written and kept, and the tooling has followed: a 3
+(the hook or the formatter failed) exits before the step runs. Outside a git worktree the step
+cannot classify anything and prints that it did not run. `relock --help`
 has the rest.
 
 `relock --hub`, which converged both locks onto the gen hub's pins, is retired and now refused as an

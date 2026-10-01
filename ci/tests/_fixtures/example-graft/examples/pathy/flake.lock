@@ -1,0 +1,8 @@
+{
+  "nodes": {
+    "near": { "locked": { "type": "path", "path": "./near" } },
+    "root": { "inputs": { "near": "near" } }
+  },
+  "root": "root",
+  "version": 7
+}

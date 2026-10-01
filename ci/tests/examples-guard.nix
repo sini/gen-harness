@@ -249,6 +249,91 @@ in
       };
     };
 
+    # ── INTEGRATION EXAMPLES (`exampleAtOwnLock`) ──
+    # `integration/` carries `examples/alpha` and the anchored `.gitignore` line, and no lock. The
+    # suite holds the class in one cell and forces nothing: the value is forced at the relock.
+    test-an-integration-declaration-gets-the-not-committed-cell-only = {
+      expr = lib.mapAttrs (_: holds) (
+        guard.cells {
+          root = fx + "/integration";
+          declared.alpha = guard.exampleAtOwnLock "alpha" (_: throw "forced at the relock, never here");
+        }
+      );
+      expected = {
+        test-every-example-directory-is-declared = true;
+        test-alpha-integration-lock-is-not-committed = true;
+      };
+    };
+
+    # Without the `.gitignore` line the relock does not classify the example, so nothing would force
+    # it; the cell refuses instead. `clean/` has no `.gitignore`.
+    test-an-integration-declaration-without-the-gitignore-line-is-refused = {
+      expr =
+        (guard.cells {
+          root = clean;
+          declared = {
+            alpha = guard.exampleAtOwnLock "alpha" (f: f);
+            beta = { };
+          };
+        }).test-alpha-integration-lock-is-not-committed.expr;
+      expected = [ "the root .gitignore lacks the exact line /examples/alpha/flake.lock" ];
+    };
+
+    test-a-committed-integration-lock-is-refused = {
+      expr =
+        builtins.elem "examples/demo/flake.lock is committed"
+          (guard.cells {
+            root = ./_fixtures/example-graft;
+            declared = {
+              demo = guard.exampleAtOwnLock "demo" (f: f);
+              pathy = { };
+            };
+          }).test-demo-integration-lock-is-not-committed.expr;
+      expected = true;
+    };
+
+    test-an-integration-declaration-naming-another-directory-is-refused = {
+      expr =
+        (guard.cells {
+          root = fx + "/integration";
+          declared.alpha = guard.exampleAtOwnLock "beta" (f: f);
+        }).test-alpha-integration-lock-is-not-committed.expr;
+      expected = [ "declared as alpha but grafts examples/beta" ];
+    };
+
+    # The relock's cells: keyed by directory, the force and leaves cells over `select (flakeOf dir)`,
+    # and nothing for a library declaration.
+    test-the-relock-cells-are-keyed-by-integration-directory = {
+      expr =
+        let
+          r = guard.relockCells {
+            declared = {
+              alpha = guard.exampleAtOwnLock "alpha" (f: f.tests);
+              beta = { };
+            };
+            flakeOf = dir: {
+              tests.test-dir = {
+                expr = dir;
+                expected = "alpha";
+              };
+            };
+          };
+        in
+        lib.mapAttrs (_: lib.mapAttrs (_: holds)) r;
+      expected.alpha = {
+        test-alpha-forces-under-deepSeq = true;
+        test-alpha-every-leaf-holds = true;
+      };
+    };
+    test-a-red-integration-value-reds-its-relock-cell = {
+      expr =
+        (guard.relockCells {
+          declared.alpha = guard.exampleAtOwnLock "alpha" (f: f);
+          flakeOf = _: { tests.test-bad = bad; };
+        }).alpha.test-alpha-every-leaf-holds.expr;
+      expected = [ "tests.test-bad" ];
+    };
+
     # `mkCi` adds `examples/` to the read roots exactly when the source carries it.
     test-the-read-root-is-added-only-where-examples-exists = {
       expr = {

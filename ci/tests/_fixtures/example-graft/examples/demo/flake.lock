@@ -1,0 +1,42 @@
+{
+  "nodes": {
+    "g": {
+      "locked": {
+        "type": "git",
+        "url": "https://example.org/x/graft-fixture-parent.git",
+        "rev": "3333333333333333333333333333333333333333"
+      }
+    },
+    "p": {
+      "locked": {
+        "type": "github",
+        "owner": "sini",
+        "repo": "graft-fixture-parent",
+        "rev": "1111111111111111111111111111111111111111"
+      }
+    },
+    "q": {
+      "inputs": { "x": "p" },
+      "locked": {
+        "type": "github",
+        "owner": "sini",
+        "repo": "graft-fixture-parent",
+        "rev": "2222222222222222222222222222222222222222"
+      }
+    },
+    "root": {
+      "inputs": { "g": "g", "p": "p", "q": "q", "src": "src" }
+    },
+    "src": {
+      "flake": false,
+      "locked": {
+        "type": "github",
+        "owner": "sini",
+        "repo": "graft-fixture-parent",
+        "rev": "1111111111111111111111111111111111111111"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

@@ -27,7 +27,11 @@
 #
 # EXIT VOCABULARY: 0 done · 1 REFUSED, nothing written · 2 a control failed or the invocation was
 # malformed · 3 THE LOCKS ARE WRITTEN AND THE TOOLING DID NOT FOLLOW — a state the other three
-# cannot express, and the one a caller must not read as either success or as "nothing happened".
+# cannot express, and the one a caller must not read as either success or as "nothing happened" ·
+# 4 INTEGRATION-RED: the locks are written, the tooling followed, and an integration example's
+# cells do not hold over the working tree (the integration step at the foot). 4 is its own code
+# rather than a third cause of 3: a 3 is repaired by re-entering the devshell or the formatter, a 4
+# by repairing the library or the example, and a caller routing on the code must not conflate them.
 #
 # ★ IT VERIFIES ITS OWN OUTPUT AND REFUSES TO LEAVE A VIOLATING STATE. A relock is exactly the act
 # that can pull a member's own repository into its `ci/` closure, so `ci-self-input.nix`'s scanner
@@ -54,6 +58,8 @@ pkgs.writeShellApplication {
     pkgs.coreutils
     pkgs.git
     pkgs.gnused
+    pkgs.gnutar
+    pkgs.diffutils
   ];
   text = ''
     self=${name}-relock
@@ -76,8 +82,14 @@ pkgs.writeShellApplication {
         "on every run that is not refused." \
         "" \
         "Each examples/<d>/flake.lock is relocked after both, unless it resolves to this" \
-        "repository (an integration example): that one is named and skipped, and a bump that" \
-        "would make it resolve here is restored and named." \
+        "repository: that one is named and skipped, and a bump that would make it resolve here" \
+        "is restored and named." \
+        "" \
+        "An INTEGRATION example is one whose examples/<d>/flake.lock git ignores. Last, on every" \
+        "run that is not refused, each is locked fresh in a scratch copy of the tracked tree and" \
+        "its examplesAtRelock cells are evaluated there, with this repository grafted onto the" \
+        "working tree. The working tree is never written. A cell that does not hold prints" \
+        "INTEGRATION-RED on stderr and exits 4, with every lock written." \
         "" \
         "relock --hub is RETIRED (it pinned inputs to the hub's revisions). Use bare relock for this" \
         "repository, and den-ag-design's relock-all to move the whole gen graph to its tips." >&2
@@ -372,10 +384,37 @@ pkgs.writeShellApplication {
     # run so nothing goes stale in silence. An example with no lock has never been locked, and
     # writing its first lock is not a relock.
     # Spec: den-ag-design `specs/2026-09-29-gen-examples-locks-spec.md` §2.4.
+    #
+    # ★ AN INTEGRATION EXAMPLE IS DECIDED FIRST, BY `git check-ignore` (owner, 2026-09-30: its lock
+    # is not committed, and the relock regenerates it locally). It is never bumped in place: the
+    # integration step at the foot locks it fresh in a scratch copy, because an ignored lock left in
+    # the tree makes the guarded `ci` refuse. `check-ignore` without `--no-index` reads a TRACKED
+    # lock as not ignored, so a lock committed by mistake falls out of the class and the member's
+    # `test-<d>-integration-lock-is-not-committed` reds it. Outside a git worktree nothing can be
+    # classified, and the step says so instead of running.
+    integrationDirs=()
+    inGit=no
+    if git -C "$root" rev-parse --is-inside-work-tree > /dev/null 2>&1; then inGit=yes; fi
     exampleDirs=()
     for f in "$root"/examples/*/flake.nix; do
       [ -f "$f" ] || continue
       d=$(dirname "$f")
+      if [ "$inGit" = yes ]; then
+        rc=0
+        git -C "$root" check-ignore -q "''${d#"$root"/}/flake.lock" || rc=$?
+        case $rc in
+          0)
+            integrationDirs+=("$d")
+            continue
+            ;;
+          1) ;;
+          *)
+            printf '%s: CONTROL FAILED — git check-ignore could not classify %s (rc=%s).\n' \
+              "$self" "$d/flake.lock" "$rc" >&2
+            exit 2
+            ;;
+        esac
+      fi
       if [ ! -f "$d/flake.lock" ]; then
         printf '  %s: no flake.lock; not relocked\n' "''${d#"$root"/}"
         continue
@@ -733,6 +772,133 @@ pkgs.writeShellApplication {
         printf '%s: tracked files git now reports MODIFIED, the locks excluded:\n' "$self"
         git -C "$root" status --porcelain --untracked-files=no -- \
           . ':(exclude)flake.lock' ':(exclude)ci/flake.lock' ':(exclude)examples/*/flake.lock'
+      fi
+    fi
+
+    # ★★ THE INTEGRATION STEP, LAST, ON EVERY RUN THAT IS NOT REFUSED (owner, 2026-09-30: "lockfiles
+    # aren't commited, they are updated locally during the relock -- their tests/checks are run
+    # with override for self"). It is the forcing function for the integration examples: their
+    # cells are evaluated at every relock, against inputs at their tips, and a drift reds HERE.
+    # Nothing is committed, so nothing churns. It runs after the tooling caught up, so it reads the
+    # tree as this relock leaves it, and an exit 3 above means it did not run.
+    #
+    # ★ IN A SCRATCH COPY OF THE TRACKED TREE, NEVER IN PLACE. The guarded `ci` refuses git-unknown
+    # bytes under a read root, gitignored ones included (`den-hoag-g2glu`), and `examples/` is a
+    # read root: a lock written in the tree would red the member's own gate. The copy takes the
+    # WORKING-TREE contents of every tracked file. `path:` carries the fresh, ignored lock into the
+    # evaluated source, where `git+file:` would filter it out, and it is narHash-locked, so the
+    # evaluation stays pure.
+    #
+    # OUTPUT CONTRACT (den-ag-design's relock-all matches on it): a directory whose cells hold
+    # prints `examples/<d>: integration example, locked fresh, N cells hold over the working tree`
+    # on stdout. A cell that does not hold prints `examples/<d>: <cell> does not hold` and its
+    # error on stderr, then one line opening `INTEGRATION-RED:` on stderr, and the exit is 4. A
+    # failure to lock, to read the cells, or a cross-check or produced-tree mismatch is
+    # `CONTROL FAILED` on stderr, exit 2. Spec: den-ag-design
+    # `specs/2026-09-29-gen-examples-guard-spec.md` §2.8.4.
+    if [ "$inGit" = no ] && [ -d "$root/examples" ]; then
+      printf '  examples/: not a git worktree, so no example can be classified as integration;\n'
+      printf '    the integration step did not run\n'
+    fi
+    if [ ''${#integrationDirs[@]} -gt 0 ]; then
+      nixf=(nix --extra-experimental-features 'nix-command flakes')
+      # The produced check's subject: what git reports, ignored files included (an in-tree lock is
+      # ignored), plus HEAD and the content of every tracked change.
+      treeState() {
+        git -C "$root" status --porcelain --ignored --untracked-files=all
+        git -C "$root" rev-parse HEAD 2> /dev/null || true
+        { git -C "$root" diff HEAD --binary 2> /dev/null || true; } | md5sum
+      }
+      before=$(treeState)
+      scratch=$(mktemp -d)
+      trap 'rm -rf "$backup" "$scratch"' EXIT
+
+      # A tracked file deleted in the working tree is not copied: the copy is the working tree.
+      if ! git -C "$root" ls-files -z --cached \
+        | while IFS= read -r -d "" f; do
+          if [ -e "$root/$f" ] || [ -L "$root/$f" ]; then printf '%s\0' "$f"; fi
+        done \
+        | tar -C "$root" --null --no-recursion -T - -cf - \
+        | tar -C "$scratch" -xf -; then
+        printf '%s: CONTROL FAILED — the tracked tree could not be copied to %s.\n' "$self" "$scratch" >&2
+        exit 2
+      fi
+
+      for d in "''${integrationDirs[@]}"; do
+        rel=''${d#"$root"/}
+        rc=0
+        err=$("''${nixf[@]}" flake lock "$scratch/$rel" 2>&1) || rc=$?
+        if [ "$rc" -ne 0 ]; then
+          printf '%s: CONTROL FAILED — %s could not be locked in the scratch copy (rc=%s):\n%s\n' \
+            "$self" "$rel" "$rc" "$err" >&2
+          exit 2
+        fi
+      done
+
+      rc=0
+      cellsJson=$("''${nixf[@]}" eval --json "path:$scratch?dir=ci#examplesAtRelock" \
+        --apply 'builtins.mapAttrs (_: builtins.attrNames)' 2> "$scratch/.cells.err") || rc=$?
+      if [ "$rc" -ne 0 ]; then
+        printf '%s: CONTROL FAILED — ci#examplesAtRelock could not be read (rc=%s):\n%s\n' \
+          "$self" "$rc" "$(cat "$scratch/.cells.err")" >&2
+        exit 2
+      fi
+
+      # ★ THE CROSS-CHECK: the directories with relock cells equal the ignored set. A declaration
+      # without the `.gitignore` line is refused by the member's own CI cell; this catches the
+      # reverse, a line with no `exampleAtOwnLock` declaration, which would otherwise force nothing.
+      ignoredNames=$(for d in "''${integrationDirs[@]}"; do basename "$d"; done | sort)
+      cellNames=$(printf '%s' "$cellsJson" | jq -r 'keys[]' | sort)
+      if [ "$ignoredNames" != "$cellNames" ]; then
+        printf '%s\n' \
+          "$self: CONTROL FAILED — the integration examples git ignores and the ones ci declares" \
+          "through exampleAtOwnLock differ:" \
+          "  ignored  (examples/<d>/flake.lock in .gitignore): $(printf '%s' "$ignoredNames" | tr '\n' ' ')" \
+          "  declared (ci#examplesAtRelock):                   $(printf '%s' "$cellNames" | tr '\n' ' ')" >&2
+        exit 2
+      fi
+
+      red=0
+      total=0
+      # The green lines wait for the produced check: a step that wrote the tree has no green to report.
+      greens=()
+      for d in "''${integrationDirs[@]}"; do
+        n=$(basename "$d")
+        held=0
+        mapfile -t cells < <(printf '%s' "$cellsJson" | jq -r --arg n "$n" '.[$n][]')
+        for c in "''${cells[@]}"; do
+          total=$((total + 1))
+          rc=0
+          out=$("''${nixf[@]}" eval --json "path:$scratch?dir=ci#examplesAtRelock.\"$n\".\"$c\"" \
+            --apply 'c: c.expr == c.expected' 2> "$scratch/.cell.err") || rc=$?
+          if [ "$rc" -eq 0 ] && [ "$out" = true ]; then
+            held=$((held + 1))
+          else
+            red=$((red + 1))
+            printf '  examples/%s: %s does not hold (rc=%s, holds=%s)\n' "$n" "$c" "$rc" "''${out:-none}" >&2
+            sed -n '/error:/,$p' "$scratch/.cell.err" | head -n 8 | sed 's/^/    /' >&2
+          fi
+        done
+        if [ "$held" -eq "''${#cells[@]}" ]; then
+          greens+=("  examples/$n: integration example, locked fresh, $held cells hold over the working tree")
+        fi
+      done
+
+      after=$(treeState)
+      if [ "$before" != "$after" ]; then
+        printf '%s: CONTROL FAILED — the integration step changed the working tree, which it never writes:\n%s\n' \
+          "$self" "$(diff <(printf '%s\n' "$before") <(printf '%s\n' "$after") || true)" >&2
+        exit 2
+      fi
+      if [ ''${#greens[@]} -gt 0 ]; then printf '%s\n' "''${greens[@]}"; fi
+
+      if [ "$red" -ne 0 ]; then
+        printf '%s\n' \
+          "INTEGRATION-RED: $red of $total integration-example cells do not hold over the working tree." \
+          "The locks are written and kept. Each example was locked fresh in a scratch copy with this" \
+          "repository grafted onto the working tree, so the red is the tree's: repair the library or" \
+          "the example." >&2
+        exit 4
       fi
     fi
   '';
