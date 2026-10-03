@@ -16,17 +16,33 @@
 # holds this predicate equal to the scanner's over the scanner's own seeds.
 #
 # ★ ONE VALUE, FOLDED FROM THE PARENT'S OWN ROOT LOCK. Every parent node, whatever its label and
-# whoever reaches it, becomes the tree's flake folded from the tree's `flake.lock`, so its inputs
-# are the tree's pins and never the example lock's. That is nix's own override semantics: with an
-# input overridden to a tree, `nix flake lock` takes the tree's lock for that input's dependencies.
-# A parent with no root lock folds with no inputs.
+# whoever reaches it, becomes the tree's flake folded from the tree's `flake.lock`, so the tree's
+# inputs are the tree's pins and never the example lock's. A parent with no root lock folds with no
+# inputs.
 #
-# ★ A `flake = false` PARENT NODE BECOMES THE TREE'S SOURCE, never its flake value: the consumer
-# declared a source. A `path` node is refused by name: a relative path resolves against the
-# example's own source, which this fold does not model.
+# ★ ONE NODE PER SHARED REPOSITORY, AT THE NEWER PIN. A repository is SHARED when the example lock
+# reaches it by a `follows` from a parent node, or from a node of a repository already shared: the
+# hub declaring one node for it, so the published closure holds it once. Every edge into a shared
+# repository the parent's lock also pins, from either lock and at any depth, takes ONE node: the
+# newer by `locked.lastModified` of the parent's pin and the example's, ties and absent dates to the
+# parent. That is the closure that publishes, since the hub trails and relocks each shared repository
+# to at least both. The parent's pin alone would hold a trailing parent's hub siblings to a
+# dependency older than the hub's; the example's alone would run the tree on a dependency it does
+# not declare. Two values of one library in one evaluation is the defect either way, since gen's
+# identity is value-borne. A parent lock pinning a shared repository at two revisions is refused by
+# name. A repository the example lock does not unify keeps its two nodes, as it will publish.
 #
-# Every other node keeps the example lock's pin, with `follows` resolved from the example lock's
-# root. The fold is pure: every such node is rev- and narHash-locked. Nothing is written.
+# Nix's override is not the primary here. `nix flake lock --override-input <hub>/<parent> <tree>`
+# keeps the hub's follows when the override creates the lock, and drops them for the tree's own
+# lock when the lock already exists, which is the two-copy closure (Nix, Determinate and Lix alike).
+#
+# ★ A `flake = false` NODE IS TAKEN AS ITS SOURCE, never its flake value: the referencing edge
+# declared a source. A parent node so declared becomes the tree's source. A `path` node is refused
+# by name: a relative path resolves against the example's own source, which this fold does not
+# model.
+#
+# Every other node keeps its lock's pin, with `follows` resolved from that lock's root. The fold is
+# pure: every such node is rev- and narHash-locked. Nothing is written.
 {
   # The repository root, `inputs.self.sourceInfo.outPath`: the tree the parent nodes become.
   root,
@@ -34,6 +50,9 @@
   name,
   # The example's directory under `examples/`.
   dir,
+  # The fetcher for every node that is not a lock's root. A test seam: `tests.example-graft` stubs
+  # it to evaluate a shared-node fixture offline. The flake module passes nothing.
+  fetch ? builtins.fetchTree,
 }:
 let
   exampleDir = root + "/examples/${dir}";
@@ -65,43 +84,121 @@ let
     in
     if m >= n && builtins.substring (m - n) n str == sfx then builtins.substring 0 (m - n) str else str;
 
-  # The scanner's predicate. A `path` node names no repository.
-  isParentNode =
+  # The scanner's identity. A `path` node names no repository.
+  repoOf =
     node:
     let
       l = node.locked or { };
-      repo =
-        if l ? repo then
-          l.repo
-        else if (l.type or "") == "git" && l ? url then
-          last (builtins.split "/" (removeSuffix ".git" l.url))
-        else
-          null;
     in
-    repo == name;
+    if l ? repo then
+      l.repo
+    else if (l.type or "") == "git" && l ? url then
+      last (builtins.split "/" (removeSuffix ".git" l.url))
+    else
+      null;
+  isParentNode = node: repoOf node == name;
 
-  fold =
-    lock: rootSrc: override:
+  # repository -> its non-root node keys in one lock.
+  keysByRepo =
+    lock:
+    builtins.groupBy (k: repoOf lock.nodes.${k}) (
+      builtins.filter (k: k != lock.root && repoOf lock.nodes.${k} != null) (
+        builtins.attrNames lock.nodes
+      )
+    );
+  parentKeys = keysByRepo parentLock;
+  exampleKeys = keysByRepo exampleLock;
+
+  # The repositories the example lock unifies: reached by a `follows` from the parent's nodes, then
+  # from the nodes of every repository so reached.
+  shared = map (x: x.key) (
+    builtins.genericClosure {
+      startSet = [ { key = name; } ];
+      operator =
+        { key }:
+        builtins.concatMap (
+          k:
+          builtins.concatMap (
+            spec:
+            let
+              r = repoOf exampleLock.nodes.${resolveIn exampleLock spec};
+            in
+            if builtins.isList spec && r != null then [ { key = r; } ] else [ ]
+          ) (builtins.attrValues (exampleLock.nodes.${k}.inputs or { }))
+        ) (exampleKeys.${key} or [ ]);
+    }
+  );
+
+  # A shared repository the parent pins -> the one node every edge into it takes, `{ inParent; key; }`.
+  pick =
+    repo:
     let
-      allNodes = builtins.mapAttrs (
+      ks = parentKeys.${repo};
+      hashes = map (k: parentLock.nodes.${k}.locked.narHash or k) ks;
+      own =
+        if builtins.length (builtins.attrNames (builtins.groupBy (h: h) hashes)) > 1 then
+          throw "example graft: the parent's own flake.lock pins `${repo}` at more than one revision (${toString ks}), so the closure would hold two copies"
+        else
+          builtins.head ks;
+      date = lock: k: lock.nodes.${k}.locked.lastModified or null;
+      newest =
+        builtins.foldl'
+          (
+            best: k:
+            let
+              d = date exampleLock k;
+            in
+            if best.d != null && d != null && d > best.d then { inherit d k; } else best
+          )
+          {
+            d = date parentLock own;
+            k = null;
+          }
+          (exampleKeys.${repo} or [ ]);
+    in
+    if newest.k == null then
+      {
+        inParent = true;
+        key = own;
+      }
+    else
+      {
+        inParent = false;
+        key = newest.k;
+      };
+  chosen =
+    builtins.listToAttrs (
+      map (r: {
+        name = r;
+        value = pick r;
+      }) (builtins.filter (r: r != name && parentKeys ? ${r}) shared)
+    )
+    // {
+      ${name} = {
+        inParent = true;
+        key = parentLock.root;
+      };
+    };
+
+  # One table per lock, each node lazily `{ flake; src; }`. An edge resolves in its own lock, then
+  # through `chosen`; the referencing node's `flake` flag picks the flake value or the source.
+  table =
+    lock: rootSrc: where:
+    let
+      self = builtins.mapAttrs (
         key: node:
         let
-          o =
-            if (node.locked.type or "") == "path" && key != lock.root then
-              throw "example graft: examples/${dir}/flake.lock node `${key}` is a `path` node, which this fold does not resolve"
-            else
-              override key node;
           sourceInfo =
             if key == lock.root then
               { outPath = rootSrc; }
-            else if o ? src then
-              { outPath = o.src; }
+            else if (node.locked.type or "") == "path" then
+              throw "example graft: ${where} node `${key}` is a `path` node, which this fold does not resolve"
             else
-              builtins.fetchTree (node.info or { } // removeAttrs node.locked [ "dir" ]);
-          subdir = if key == lock.root || o ? src then "" else node.locked.dir or "";
+              fetch (node.info or { } // removeAttrs node.locked [ "dir" ]);
+          subdir = if key == lock.root then "" else node.locked.dir or "";
           outPath = if subdir == "" then sourceInfo.outPath else sourceInfo.outPath + "/${subdir}";
           flake = import (outPath + "/flake.nix");
-          inputs = builtins.mapAttrs (_: spec: allNodes.${resolveIn lock spec}) (node.inputs or { });
+          inputs = builtins.mapAttrs (_: spec: valueOf lock self (resolveIn lock spec)) (node.inputs or { });
           outputs = flake.outputs (inputs // { self = result; });
           result =
             outputs
@@ -116,32 +213,44 @@ let
               _type = "flake";
             };
         in
-        if o ? result then
-          o.result
-        else if node.flake or true then
-          result
-        else
-          sourceInfo
+        {
+          flake = result;
+          src = sourceInfo;
+        }
       ) lock.nodes;
     in
-    allNodes;
+    self;
+  valueOf =
+    lock: self: k:
+    let
+      node = lock.nodes.${k};
+      r = repoOf node;
+      c = if r != null && chosen ? ${r} then chosen.${r} else null;
+      v =
+        if c == null then
+          self.${k}
+        else if c.inParent then
+          parentNodes.${c.key}
+        else
+          exampleNodes.${c.key};
+    in
+    if node.flake or true then v.flake else v.src;
 
-  parentAtOwnLock = (fold parentLock root (_: _: { })).${parentLock.root};
+  parentNodes = table parentLock root "the parent's flake.lock";
+  exampleNodes = table exampleLock exampleDir "examples/${dir}/flake.lock";
+
   grafted = builtins.filter (k: isParentNode exampleLock.nodes.${k}) (
     builtins.attrNames exampleLock.nodes
   );
-  override =
-    key: node:
-    if !(builtins.elem key grafted) then
-      { }
-    else if !(node.flake or true) then
-      { src = root; }
-    else
-      { result = parentAtOwnLock; };
-  nodes = fold exampleLock exampleDir override;
+  nodes = builtins.mapAttrs (k: _: valueOf exampleLock exampleNodes k) exampleLock.nodes;
 in
 {
-  inherit isParentNode grafted nodes;
+  inherit
+    isParentNode
+    grafted
+    nodes
+    shared
+    ;
   # The example's flake: its outputs over the grafted inputs.
-  flake = nodes.${exampleLock.root};
+  flake = exampleNodes.${exampleLock.root}.flake;
 }

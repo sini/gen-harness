@@ -1,0 +1,1 @@
+{ outputs = import ../outputs.nix; }

@@ -14,6 +14,13 @@ let
     };
   demo = graft "demo";
 
+  # The shared-node fixture, offline through the `fetch` seam.
+  sx = import ./_fixtures/example-graft-shared { inherit lib; };
+  at = dir: (sx.graft "tree" dir).flake;
+  depPin = lockFile: {
+    inherit ((lib.importJSON lockFile).nodes.dep.locked) rev lastModified;
+  };
+
   # The self-input scanner's seeds, through a `pkgs` stub: `passthru.seeds` is plain data, and the
   # stub's `runCommand` returns the attributes it was given so nothing is built.
   seeds =
@@ -94,6 +101,107 @@ in
         selected = s.expect == 1;
       }) seeds;
     };
+    # A repository the example lock unifies and the parent pins is ONE node, at the newer pin by
+    # `lastModified`: the parent's when it leads, the hub's when the parent trails, the parent's on a
+    # tie. `oneValue` holds only for one value (the dep carries a lambda).
+    test-a-leading-parents-shared-dependency-is-one-node-at-the-parents-pin = {
+      expr = {
+        inherit (at "lead") hubDep parentDep oneValue;
+      };
+      expected = {
+        hubDep = "a";
+        parentDep = "a";
+        oneValue = true;
+      };
+    };
+    test-a-trailing-parents-shared-dependency-is-one-node-at-the-hubs-pin = {
+      expr = {
+        inherit (at "trail") hubDep parentDep oneValue;
+      };
+      expected = {
+        hubDep = "b";
+        parentDep = "b";
+        oneValue = true;
+      };
+    };
+    test-two-pins-at-one-date-resolve-to-the-parents = {
+      expr = {
+        inherit (at "tie") hubDep parentDep oneValue;
+      };
+      expected = {
+        hubDep = "a";
+        parentDep = "a";
+        oneValue = true;
+      };
+    };
+    test-two-nodes-at-one-revision-are-one-value = {
+      expr = (at "same-rev").oneValue;
+      expected = true;
+    };
+    test-control-the-example-locks-date-the-hubs-dependency-around-the-parents = {
+      expr =
+        lib.genAttrs [ "lead" "trail" "tie" "same-rev" ] (
+          d: depPin (./_fixtures/example-graft-shared/tree/examples + "/${d}/flake.lock")
+        )
+        // {
+          parent = depPin ./_fixtures/example-graft-shared/tree/flake.lock;
+        };
+      expected = {
+        lead = {
+          rev = sx.rev "b";
+          lastModified = 100;
+        };
+        trail = {
+          rev = sx.rev "b";
+          lastModified = 300;
+        };
+        tie = {
+          rev = sx.rev "b";
+          lastModified = 200;
+        };
+        same-rev = {
+          rev = sx.rev "a";
+          lastModified = 200;
+        };
+        parent = {
+          rev = sx.rev "a";
+          lastModified = 200;
+        };
+      };
+    };
+
+    # A `flake = false` shared node is one source: the edge takes the chosen node's source.
+    test-a-flake-false-shared-node-is-one-source = {
+      expr = {
+        inherit (at "lead") hubData parentData;
+      };
+      expected = {
+        hubData = "a";
+        parentData = "a";
+      };
+    };
+
+    # Sharing is read off the example lock's `follows`, not the owner: `graft-fixture-data` is
+    # another owner's and is shared; `graft-fixture-own`, which the parent pins but the example's
+    # parent node does not follow, keeps two nodes as it will publish, though the hub's is newer.
+    test-the-shared-repositories-are-the-ones-the-example-lock-follows = {
+      expr = lib.sort lib.lessThan (sx.graft "tree" "lead").shared;
+      expected = [
+        "graft-fixture-data"
+        "graft-fixture-dep"
+        "graft-fixture-parent"
+      ];
+    };
+    test-a-repository-the-example-lock-does-not-unify-keeps-two-nodes = {
+      expr = {
+        inherit (at "lead") hubOwn parentOwn;
+      };
+      expected = {
+        hubOwn = "b";
+        parentOwn = "a";
+      };
+    };
+
     test-control-the-seeds-hold-both-verdicts = {
       expr = lib.sort lib.lessThan (lib.unique (map (s: s.expect) seeds));
       expected = [

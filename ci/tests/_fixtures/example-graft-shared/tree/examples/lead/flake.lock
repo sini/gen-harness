@@ -1,0 +1,89 @@
+{
+  "nodes": {
+    "data": {
+      "flake": false,
+      "locked": {
+        "lastModified": 100,
+        "narHash": "sha256-D",
+        "owner": "someone",
+        "repo": "graft-fixture-data",
+        "rev": "dddddddddddddddddddddddddddddddddddddddd",
+        "type": "github"
+      }
+    },
+    "dep": {
+      "locked": {
+        "lastModified": 100,
+        "narHash": "sha256-B",
+        "owner": "sini",
+        "repo": "graft-fixture-dep",
+        "rev": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "type": "github"
+      }
+    },
+    "hub": {
+      "inputs": {
+        "data": "data",
+        "dep": "dep",
+        "own": "own",
+        "parent": "parent"
+      },
+      "locked": {
+        "lastModified": 50,
+        "narHash": "sha256-H",
+        "owner": "sini",
+        "repo": "graft-fixture-hub",
+        "rev": "9999999999999999999999999999999999999999",
+        "type": "github"
+      }
+    },
+    "own": {
+      "locked": {
+        "lastModified": 300,
+        "narHash": "sha256-F",
+        "owner": "someone",
+        "repo": "graft-fixture-own",
+        "rev": "ffffffffffffffffffffffffffffffffffffffff",
+        "type": "github"
+      }
+    },
+    "own_2": {
+      "locked": {
+        "lastModified": 200,
+        "narHash": "sha256-E",
+        "owner": "someone",
+        "repo": "graft-fixture-own",
+        "rev": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "type": "github"
+      }
+    },
+    "parent": {
+      "inputs": {
+        "data": [
+          "hub",
+          "data"
+        ],
+        "dep": [
+          "hub",
+          "dep"
+        ],
+        "own": "own_2"
+      },
+      "locked": {
+        "lastModified": 50,
+        "narHash": "sha256-P",
+        "owner": "sini",
+        "repo": "graft-fixture-parent",
+        "rev": "1111111111111111111111111111111111111111",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "hub": "hub"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

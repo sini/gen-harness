@@ -232,6 +232,20 @@ in
         ] "error plane: rebind names `gen-q`, which the rebind lock's root does not declare";
       };
 
+    # The example graft's refusal of a parent lock that pins a shared repository twice, pinned to its
+    # message. The green arms are `tests/example-graft.nix`.
+    flake.testsError.example-graft = {
+      test-a-parent-lock-pinning-a-shared-repository-twice-is-refused = {
+        expr =
+          ((import ./tests/_fixtures/example-graft-shared { inherit lib; }).graft "tree-split" "demo")
+          .flake.hubDep;
+        expectedError = {
+          type = "ThrownError";
+          msg = lib.escapeRegex "example graft: the parent's own flake.lock pins `graft-fixture-dep` at more than one revision (dep dep_2), so the closure would hold two copies";
+        };
+      };
+    };
+
     flake.testsError.escape-set = {
       # The answer is asserted, not merely the absence of an abort: `]` is passed through unescaped
       # and matched as the literal it already is, so the boolean is nixpkgs'.

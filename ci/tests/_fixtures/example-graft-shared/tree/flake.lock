@@ -1,0 +1,44 @@
+{
+  "nodes": {
+    "data": {
+      "flake": false,
+      "locked": {
+        "lastModified": 200,
+        "narHash": "sha256-C",
+        "owner": "someone",
+        "repo": "graft-fixture-data",
+        "rev": "cccccccccccccccccccccccccccccccccccccccc",
+        "type": "github"
+      }
+    },
+    "dep": {
+      "locked": {
+        "lastModified": 200,
+        "narHash": "sha256-A",
+        "owner": "sini",
+        "repo": "graft-fixture-dep",
+        "rev": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "type": "github"
+      }
+    },
+    "own": {
+      "locked": {
+        "lastModified": 200,
+        "narHash": "sha256-E",
+        "owner": "someone",
+        "repo": "graft-fixture-own",
+        "rev": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "data": "data",
+        "dep": "dep",
+        "own": "own"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
