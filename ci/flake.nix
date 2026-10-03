@@ -102,6 +102,7 @@
         ./tests-error.nix
         ./tests-process.nix
         ./process-plane-guard.nix
+        ./read-roots-guard.nix
         ./agents-md-sheet-arms.nix
         # The harness publishes no root `default.nix`; its surface is the flake's `lib`.
         { gen.ci.rootSurface.entry = "not-owed"; }

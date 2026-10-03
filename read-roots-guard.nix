@@ -15,15 +15,33 @@
   name,
   sourceRoot,
   roots,
+  # PUBLICATION-mode roots (`den-hoag-g2glu`): git-unknown bytes that `git add -A` WOULD publish
+  # are refused, gitignored ones are not. The hub passes its source root here (`roots = [ ]`);
+  # every library leaves it empty and keeps the worktree mode above, byte-for-byte.
+  publicationRoots ? [ ],
 }:
 let
   # The EVAL half, derived HERE from the caller's paths — a root the guard does not cover is
   # then a root the suite cannot read. See `readroots.nix` for why it throws rather than returns
   # on a misspelt or vacuous root.
-  readRootsRel = import ./readroots.nix {
-    inherit (pkgs) lib;
-    inherit sourceRoot;
-  } roots;
+  readRootsRel =
+    if roots == [ ] && publicationRoots != [ ] then
+      [ ]
+    else
+      import ./readroots.nix {
+        inherit (pkgs) lib;
+        inherit sourceRoot;
+      } roots;
+  publicationRel =
+    if publicationRoots == [ ] then
+      [ ]
+    else
+      import ./readroots.nix {
+        inherit (pkgs) lib;
+        inherit sourceRoot;
+        admitSourceRoot = true;
+      } publicationRoots;
+  inherit (pkgs.lib) optionalString escapeShellArgs;
 in
 # ★ THE READ-ROOTS GUARD. A suite's evaluator reads a GIT-FILTERED copy of this
 # repository, so a file git does not know about — untracked, or gitignored — is simply
@@ -55,93 +73,104 @@ pkgs.writeShellApplication {
       printf 'CONTROL FAILED: the read-roots guard is not inside a git worktree: %s\n' "$wt"
       exit 2
     fi
-    roots=(${pkgs.lib.escapeShellArgs readRootsRel})
-
+    ${optionalString (readRootsRel != [ ]) ''
+      roots=(${escapeShellArgs readRootsRel})
+    ''}
     err=$(mktemp)
     trap 'rm -f "$err"' EXIT
 
-    # ★★★ THE DISCRIMINATOR IS THE OUTPUT BEING EMPTY, AND `rc` IS A SEPARATE, THIRD
-    # OUTCOME. Measured: `git ls-files` exits 0 in every worktree state this guard cares
-    # about, refuse and pass alike, so `if ! git ls-files …` is a silent no-op that passes
-    # everything. A non-zero rc means the instrument did not RUN — a misderived root that
-    # leaked a store path reads rc=128 — and that is an abort, not a verdict about the tree.
-    #
-    # `--others` is the whole predicate over the CONTENT modes: exactly the files the index
-    # does not know. `--exclude-standard` is deliberately NOT passed — omitting it is what
-    # keeps the GITIGNORED half in domain, and it is the half that cannot be repaired by
-    # staging. It cannot name a tracked-modified, tracked-deleted or staged file, and it
-    # must not: those are fully visible to the evaluator with their worktree bytes, and
-    # refusing them would reject every commit that touches a test cell.
-    rc=0
-    out=$(git -C "$wt" ls-files --others -- "''${roots[@]}" 2>"$err") || rc=$?
-    if [ "$rc" -ne 0 ]; then
-      printf 'CONTROL FAILED: the read-roots guard did not run (rc=%s): %s\n' "$rc" "$(cat "$err")"
-      exit 2
-    fi
+    ${
+      if readRootsRel != [ ] then
+        ''
+          # ★★★ THE DISCRIMINATOR IS THE OUTPUT BEING EMPTY, AND `rc` IS A SEPARATE, THIRD
+          # OUTCOME. Measured: `git ls-files` exits 0 in every worktree state this guard cares
+          # about, refuse and pass alike, so `if ! git ls-files …` is a silent no-op that passes
+          # everything. A non-zero rc means the instrument did not RUN — a misderived root that
+          # leaked a store path reads rc=128 — and that is an abort, not a verdict about the tree.
+          #
+          # `--others` is the whole predicate over the CONTENT modes: exactly the files the index
+          # does not know. `--exclude-standard` is deliberately NOT passed — omitting it is what
+          # keeps the GITIGNORED half in domain, and it is the half that cannot be repaired by
+          # staging. It cannot name a tracked-modified, tracked-deleted or staged file, and it
+          # must not: those are fully visible to the evaluator with their worktree bytes, and
+          # refusing them would reject every commit that touches a test cell.
+          rc=0
+          out=$(git -C "$wt" ls-files --others -- "''${roots[@]}" 2>"$err") || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            printf 'CONTROL FAILED: the read-roots guard did not run (rc=%s): %s\n' "$rc" "$(cat "$err")"
+            exit 2
+          fi
 
-    # ---- the REFERENCE-MODE half: one rule over a closed enumeration, not a list of cases.
-    #
-    # The two consumers of a declared root interpret it by different functions. The GUARD
-    # hands it to git as a PATHSPEC, which matches index and worktree entries by NAME and
-    # traverses nothing. The EVALUATOR hands it to Nix as a PATH, which resolves against the
-    # materialised source: symlinks are followed, and objects with no NAR representation are
-    # simply absent. They coincide over the modes whose object IS the bytes at that path.
-    #
-    # Git's index admits exactly four modes, and they split on that question:
-    #   100644 / 100755  CONTENT   — the two extents are the same bytes; `--others` above
-    #                                is the whole predicate.
-    #   120000 SYMLINK   a reference to ANOTHER PATH. Git will not follow it; Nix will.
-    #   160000 GITLINK   a reference to a COMMIT. It has no NAR representation, so the
-    #                    source carries NONE of its bytes.
-    # ⇒ REFUSE at the two REFERENCE modes unless the reference resolves INSIDE the declared
-    # root set. For a gitlink that condition is unsatisfiable — a commit is never a path —
-    # so its refusal is unconditional and falls out of the same rule. Because the mode
-    # enumeration is CLOSED, the rule is total: a third reference mode cannot arrive
-    # without git growing one.
-    #
-    # It is a REFUSAL in its own right and not a filter over the first command's output, so
-    # the bad state cannot form. `--stage` names the ROOT ITSELF when the root is the
-    # symlink, which is why the at-root and under-root cases are one loop.
-    rc=0
-    stage=$(git -C "$wt" ls-files --stage -- "''${roots[@]}" 2>"$err") || rc=$?
-    if [ "$rc" -ne 0 ]; then
-      printf 'CONTROL FAILED: the reference-mode half did not run (rc=%s): %s\n' "$rc" "$(cat "$err")"
-      exit 2
-    fi
+          # ---- the REFERENCE-MODE half: one rule over a closed enumeration, not a list of cases.
+          #
+          # The two consumers of a declared root interpret it by different functions. The GUARD
+          # hands it to git as a PATHSPEC, which matches index and worktree entries by NAME and
+          # traverses nothing. The EVALUATOR hands it to Nix as a PATH, which resolves against the
+          # materialised source: symlinks are followed, and objects with no NAR representation are
+          # simply absent. They coincide over the modes whose object IS the bytes at that path.
+          #
+          # Git's index admits exactly four modes, and they split on that question:
+          #   100644 / 100755  CONTENT   — the two extents are the same bytes; `--others` above
+          #                                is the whole predicate.
+          #   120000 SYMLINK   a reference to ANOTHER PATH. Git will not follow it; Nix will.
+          #   160000 GITLINK   a reference to a COMMIT. It has no NAR representation, so the
+          #                    source carries NONE of its bytes.
+          # ⇒ REFUSE at the two REFERENCE modes unless the reference resolves INSIDE the declared
+          # root set. For a gitlink that condition is unsatisfiable — a commit is never a path —
+          # so its refusal is unconditional and falls out of the same rule. Because the mode
+          # enumeration is CLOSED, the rule is total: a third reference mode cannot arrive
+          # without git growing one.
+          #
+          # It is a REFUSAL in its own right and not a filter over the first command's output, so
+          # the bad state cannot form. `--stage` names the ROOT ITSELF when the root is the
+          # symlink, which is why the at-root and under-root cases are one loop.
+          rc=0
+          stage=$(git -C "$wt" ls-files --stage -- "''${roots[@]}" 2>"$err") || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            printf 'CONTROL FAILED: the reference-mode half did not run (rc=%s): %s\n' "$rc" "$(cat "$err")"
+            exit 2
+          fi
 
-    gitlinks=()
-    escapes=()
-    # `--stage` prints `<mode> <sha> <stage>\t<path>`, so a TAB split puts the path in
-    # field 2 and a path containing spaces survives intact.
-    while IFS=$'\t' read -r meta p; do
-      [ -n "$p" ] || continue
-      case "$meta" in
-      "160000 "*)
-        gitlinks+=("$p")
-        continue
-        ;;
-      "120000 "*) ;;
-      *) continue ;;
-      esac
-      # `-m` because a link may dangle. The worktree resolution is the right one to read:
-      # the source copy materialises the same link text, so relative resolution is
-      # identical, and where the two could differ — a target absent from the source — the
-      # divergence is toward REFUSING.
-      if ! tgt=$(realpath -m --relative-to="$wt" "$wt/$p" 2>"$err"); then
-        printf 'CONTROL FAILED: could not resolve the symlink %s: %s\n' "$p" "$(cat "$err")"
-        exit 2
-      fi
-      inside=no
-      for r in "''${roots[@]}"; do
-        case "$tgt" in "$r" | "$r"/*)
-          inside=yes
-          break
-          ;;
-        esac
-      done
-      [ "$inside" = yes ] || escapes+=("$p -> $tgt")
-    done <<<"$stage"
-
+          gitlinks=()
+          escapes=()
+          # `--stage` prints `<mode> <sha> <stage>\t<path>`, so a TAB split puts the path in
+          # field 2 and a path containing spaces survives intact.
+          while IFS=$'\t' read -r meta p; do
+            [ -n "$p" ] || continue
+            case "$meta" in
+            "160000 "*)
+              gitlinks+=("$p")
+              continue
+              ;;
+            "120000 "*) ;;
+            *) continue ;;
+            esac
+            # `-m` because a link may dangle. The worktree resolution is the right one to read:
+            # the source copy materialises the same link text, so relative resolution is
+            # identical, and where the two could differ — a target absent from the source — the
+            # divergence is toward REFUSING.
+            if ! tgt=$(realpath -m --relative-to="$wt" "$wt/$p" 2>"$err"); then
+              printf 'CONTROL FAILED: could not resolve the symlink %s: %s\n' "$p" "$(cat "$err")"
+              exit 2
+            fi
+            inside=no
+            for r in "''${roots[@]}"; do
+              case "$tgt" in "$r" | "$r"/*)
+                inside=yes
+                break
+                ;;
+              esac
+            done
+            [ "$inside" = yes ] || escapes+=("$p -> $tgt")
+          done <<<"$stage"
+        ''
+      else
+        ''
+          out=""
+          gitlinks=()
+          escapes=()
+        ''
+    }
     st=0
     if [ -n "$out" ]; then
       echo "REFUSE: git-unknown bytes under a declared read root — the evaluator cannot see them, so the suite would report a verdict it did not compute:"
@@ -159,6 +188,29 @@ pkgs.writeShellApplication {
       printf '%s\n' "''${escapes[@]}"
       st=1
     fi
-    exit "$st"
+    ${
+      optionalString (publicationRel != [ ]) ''
+        # ★ PUBLICATION MODE (`den-hoag-g2glu`): the refused set is the git-unknown bytes the next
+        # `git add -A` would PUBLISH — `--exclude-standard`, so a gitignored byte (a `result-*` link,
+        # the devshell's own `.pre-commit-config.yaml`) is out of domain. Worktree mode above
+        # refuses those too; that is right under a collection root and unsatisfiable at a repository
+        # root. The domain is the REPOSITORY's, never the host's: `core.excludesFile` is pointed at
+        # an empty file, so a pattern in `~/.config/git/ignore` cannot hide a new file from the
+        # verdict (git consults that file by default even with no `core.excludesFile` set).
+        pubroots=(${escapeShellArgs publicationRel})
+        rc=0
+        pub=$(GIT_CONFIG_GLOBAL=/dev/null git -C "$wt" -c core.excludesFile=/dev/null ls-files --others --exclude-standard -- "''${pubroots[@]}" 2>"$err") || rc=$?
+        if [ "$rc" -ne 0 ]; then
+          printf 'CONTROL FAILED: the publication-mode read-roots guard did not run (rc=%s): %s\n' "$rc" "$(cat "$err")"
+          exit 2
+        fi
+        if [ -n "$pub" ]; then
+          echo "REFUSE: untracked, un-ignored files under the repository root — a check that enumerates or probes the tree reads a git-filtered source and would not see them, so its verdict is not about the tree you would publish:"
+          echo "$pub"
+          echo "remedy: \`git add\` it, add it to .gitignore, or delete it."
+          st=1
+        fi
+      ''
+    }exit "$st"
   '';
 }

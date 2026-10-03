@@ -14,9 +14,19 @@
 # the guard is silently OFF for that root and reads exactly like a clean one. Emptiness
 # cannot distinguish "this root is clean" from "this root names nothing", so the
 # distinguishing has to happen here, where the root is still a path value.
+#
+# `admitSourceRoot` is the PUBLICATION-mode door (`read-roots-guard.nix`): the hub holds its
+# whole repository to the publication invariant, so there the source root is a legitimate root
+# and strips to `.`. Worktree mode keeps the throw — the source root there is a guard that
+# always refuses (every gitignored byte in the checkout), which is a misderived root.
+#
+# ★ A ROOT IS A PATH VALUE (or an absolute string, which is what `sourceInfo.outPath` is). A
+# relative string such as `"ci/tests"` reaches `builtins.pathExists` and aborts with a type error
+# that `tryEval` cannot catch; the named throw below is the catchable door for that caller's mistake.
 {
   lib,
   sourceRoot,
+  admitSourceRoot ? false,
 }:
 let
   root = toString sourceRoot;
@@ -26,8 +36,12 @@ let
     let
       s = toString r;
     in
-    if !builtins.pathExists r then
+    if !(builtins.isPath r || (builtins.isString r && lib.hasPrefix "/" r)) then
+      throw "readRoots: a root must be a path value or an absolute path string, got ${builtins.typeOf r}: ${s}"
+    else if !builtins.pathExists r then
       throw "readRoots: root does not exist in the evaluated source: ${s}"
+    else if s == root && admitSourceRoot then
+      "."
     else if s == root then
       throw "readRoots: root is the source root; it cannot be made relative: ${s}"
     else
