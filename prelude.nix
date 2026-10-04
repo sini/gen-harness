@@ -12,8 +12,13 @@
 # where the whole library lives and where the pin is the consumer's own. Widening this file to
 # meet such a suite would make the harness a library again.
 #
-# The duplication is instrumented, not trusted: ./ci's agreement suite pins gen-prelude in the
-# harness's own test plane and asserts this copy answers as the original does.
+# The duplication is instrumented, not trusted: ./ci's agreement suite holds this copy to nixpkgs
+# `lib.hasInfix`, the reference it is a drop-in for (THEORY below), and gen-prelude's fidelity suite
+# holds the original to the same reference on the same case classes, so copy = original is the
+# composition of the two. ./ci declares no gen input to compare against directly: every member's ci
+# pins this repository, so one would close a revision cycle (den-hoag-lock-currency-ruling-ez1yq).
+# The composition rests on two nixpkgs pins, this ci's and gen-prelude's ci's, which nothing holds
+# equal — they agree while `escapeRegex` and `hasInfix` are the same in both.
 #
 # THEORY. nixpkgs `lib.hasInfix infix s` is `match ".*${escapeRegex infix}.*" s != null`; the
 # leading/trailing `.*` make std::regex recurse to depth ∝ `stringLength s`, overflowing the C
@@ -31,11 +36,12 @@
 # carrying `]` aborts on every `]`-bearing needle where nixpkgs returns a boolean.
 # `builtins.tryEval` does not contain that abort.
 #
-# Each equality is asserted where it can be. ./ci's escape-set suite reads this list and
-# gen-prelude's from source at the rev ./ci/flake.lock pins and compares them as TEXT, so the copy
-# tracks the original rather than snapshotting it, and neither a member added upstream nor one
-# dropped here passes unnamed; holding gen-prelude's own set to nixpkgs' is gen-prelude's fidelity
-# suite, not this file's. `]` is the standing witness of both directions, and its cells live on
+# Each equality is asserted where it can be. ./ci's escape-set suite holds every member against
+# nixpkgs, one cell each, and its whole-domain cell runs this copy and nixpkgs over every printable
+# ASCII character, so a member dropped here or added here reds by name; holding gen-prelude's own
+# set to nixpkgs' is gen-prelude's fidelity suite, not this file's. `]` is the standing witness of
+# both directions, and its cells — with the whole-domain cell, which also aborts on an added
+# member — live on
 # ./ci's second test output, `testsError` — an `expr` that answers only while `]` stays a non-member
 # would ABORT the batch asserter behind `checks.default`, which forces every `expr` under
 # `flake.tests`, rather than fail a cell there.

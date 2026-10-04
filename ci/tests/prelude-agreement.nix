@@ -1,17 +1,20 @@
-# AGREEMENT — the vendored hasInfix answers as gen-prelude's does.
+# AGREEMENT — the vendored hasInfix answers as nixpkgs `lib.hasInfix` does.
 #
 # The harness carries a copy of one function so that it can declare no gen input. A copy is a
-# claim about another repository's code, and this suite is what makes that claim checkable: the
-# original is pinned in the test plane and the two are run over the same cases. `genPrelude` here
-# is not a local import — it is the value mkCi hands to every consuming suite, so the subject is
-# what ships rather than what the file says.
+# claim, and this suite makes it checkable against the REFERENCE the copy is a drop-in for:
+# nixpkgs `lib.hasInfix`, which gen-prelude's own fidelity suite holds the original to on the same
+# terms (gen-prelude `ci/tests/prelude.nix`, `escCell` and `test-escapeRegex-printable-ascii`).
+# Agreement with the original is the composition of the two. The reference is read from this
+# plane's `nixpkgs`, never from a gen input: every member's ci pins this repository, so a gen
+# input here closes a revision cycle no relock order can settle (den-hoag-lock-currency-ruling-ez1yq).
+# `genPrelude` here is not a local import — it is the value mkCi hands to every consuming suite,
+# so the subject is what ships rather than what the file says.
 #
 # The metacharacter cases are the sharp half. Both implementations escape the needle before
 # handing it to a regex primitive, so a broken escape is the failure mode a naive case table
 # (letters only) cannot see: `.*` would then match everything and the difference would be silent.
 {
   genPrelude,
-  upstreamPrelude,
   lib,
   ...
 }:
@@ -136,12 +139,12 @@ let
   ];
 
   vendored = map (c: genPrelude.hasInfix c.needle c.haystack) cases;
-  upstream = map (c: upstreamPrelude.hasInfix c.needle c.haystack) cases;
+  upstream = map (c: lib.hasInfix c.needle c.haystack) cases;
   stated = map (c: c.expected) cases;
 in
 {
   flake.tests.prelude-agreement = {
-    test-vendored-agrees-with-gen-prelude = {
+    test-vendored-agrees-with-nixpkgs = {
       expr = vendored;
       expected = upstream;
     };
@@ -164,11 +167,11 @@ in
       };
     };
 
-    # CONTROL — the comparison target is the real library, not a second reference to the copy.
-    # Wire `upstreamPrelude` to the vendored value and the agreement assertion passes vacuously;
-    # the original carries dozens of attributes and the harness's surface carries one.
-    test-upstream-is-the-whole-library = {
-      expr = lib.length (lib.attrNames upstreamPrelude) > 10;
+    # CONTROL — the comparison target is nixpkgs' whole `lib`, not a second reference to the copy.
+    # Wire the reference to the vendored value and the agreement assertion passes vacuously; nixpkgs
+    # carries hundreds of attributes, `escapeRegex` among them, and the harness's surface carries one.
+    test-upstream-is-nixpkgs-lib = {
+      expr = lib.length (lib.attrNames lib) > 10 && lib.escapeRegex "a.b" == "a\\.b";
       expected = true;
     };
 

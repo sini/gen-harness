@@ -4,8 +4,9 @@
 # Outside a bracket expression it is already literal, so escaping it yields `\]`, which the regex
 # engine rejects outright: a set carrying `]` aborts on every `]`-bearing needle, and a set without
 # it returns the same boolean nixpkgs does. Neither the vendored copy (../prelude.nix) nor
-# gen-prelude carries it, so both ANSWER, and the cells below assert that answer against a stated
-# value. Put `]` back into either set and the corresponding call stops answering and aborts.
+# nixpkgs' `escapeRegex` carries it, so both ANSWER, and the cells below assert that answer against
+# a stated value. Put `]` into the copy's set and its call stops answering and aborts; gen-prelude's
+# own `]` cells hold the original to the same reference in its ci.
 #
 # `builtins.tryEval` does not catch that class — it catches thrown errors and failed assertions, not
 # an evaluation error from a rejected regex — so nix-unit's `expectedError` is the only assertion
@@ -31,7 +32,6 @@
   lib,
   inputs,
   genPrelude,
-  upstreamPrelude,
   ...
 }:
 let
@@ -58,6 +58,21 @@ let
     };
   };
   gone = "root-surface-fixture: `gone` is retired (use `live`).";
+
+  # Every printable ASCII character, in code-point order — gen-prelude's `printableAscii`, the
+  # whole single-character domain an escape set draws from, so a member ADDED to the copy is
+  # reached whichever character it is. Per character: present between two letters, and absent
+  # from a tab (matched by `.`, `^`, `$` and `|` as patterns, so an unescaped member answers true).
+  probe =
+    f:
+    map
+      (c: [
+        (f c "x${c}y")
+        (f c "\t")
+      ])
+      (
+        lib.stringToCharacters " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
+      );
 in
 {
   config = {
@@ -254,11 +269,11 @@ in
         expected = true;
       };
 
-      # The original answers identically, which is what makes the domain the original's rather than
-      # the copy's. Put `]` into either escape set and exactly one of these two cells aborts, naming
-      # which side moved.
+      # The reference answers identically, which is what makes the domain nixpkgs' rather than the
+      # copy's. Put `]` into the copy's escape set and only the cell above aborts, naming the side
+      # that moved.
       test-upstream-close-bracket-answers-identically = {
-        expr = upstreamPrelude.hasInfix "]" "a]b";
+        expr = lib.hasInfix "]" "a]b";
         expected = true;
       };
 
@@ -269,6 +284,27 @@ in
       test-control-a-missing-close-bracket-answers-false = {
         expr = genPrelude.hasInfix "]" "ab";
         expected = false;
+      };
+
+      # The copy agrees with nixpkgs over the whole domain: a member added to the copy's set answers
+      # differently on its own character, or aborts (`\d` is not a valid regex to the engine), which
+      # is why this cell is on this output. It replaces a TEXT comparison against gen-prelude's set,
+      # which needed gen-prelude on this plane — a revision cycle (den-hoag-lock-currency-ruling-ez1yq).
+      test-set-agrees-with-nixpkgs-over-the-domain = {
+        expr = probe genPrelude.hasInfix;
+        expected = probe lib.hasInfix;
+      };
+
+      # LIVE CONTROL, same run: the probe discriminates — every character is present in its first
+      # haystack and absent from its second, so a probe stuck at one answer fails here.
+      test-control-the-domain-probe-holds-both-answers = {
+        expr = lib.unique (probe genPrelude.hasInfix);
+        expected = [
+          [
+            true
+            false
+          ]
+        ];
       };
     };
   };

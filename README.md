@@ -284,9 +284,13 @@ whole-file source reads.
 
 It is a vendored copy of gen-prelude's, not a pin. Pinning a library here would put that library in
 every consumer's lock, and every consumer whose own root pins it too would then hold two builds of
-one library in a single evaluation. `ci/`'s agreement suite pins the original in the harness's own
-test plane and asserts the copy answers as it does, so the duplication is instrumented rather than
-trusted; that pin is in the flake no consumer pins, so it reaches nobody's lock.
+one library in a single evaluation. `ci/`'s agreement suite holds the copy to nixpkgs `lib.hasInfix`,
+the reference it is a drop-in for, and gen-prelude's fidelity suite holds the original to the same
+reference on the same case classes, so the duplication is instrumented rather than trusted:
+copy = original is the composition of the two. That reference is two pins, this `ci/`'s nixpkgs and
+gen-prelude's ci's. Nothing holds them equal; they agree while `escapeRegex` and `hasInfix` are the
+same in both, and a nixpkgs change to either between the two pins opens a window until the next
+relock moves both. `ci/` does not pin gen-prelude to compare directly: see the next section.
 
 > **Conformance rule.** Any library whose ci tests consume a `genPrelude` attribute other than
 > `hasInfix` — directly or through an alias — must supply `genPrelude` in its own ci `specialArgs`,
@@ -300,12 +304,18 @@ exists to cut. A library taking this route needs `gen-prelude` declared at its *
 
 ## Testing the harness
 
-`ci/` is a separate flake. It hosts the harness's own suites, and it is where the ecosystem's
-cross-library integration suites — the ones whose subject is a pairing rather than a single library,
-and which therefore have no honest home in either library's own repository — live. The first has
-moved: of the four suites `nix eval ./ci#tests --apply builtins.attrNames` names today, three are
-about the harness and `dispatch-select-adapter` is the gen-dispatch × gen-select pairing, which
-declares both siblings as this flake's own inputs rather than either library's.
+`ci/` is a separate flake. It hosts the harness's own suites and nothing else: it declares **no gen
+input**, held by `ci/tests/no-gen-inputs.nix`. Every member's ci pins this repository, so a gen
+library on this test plane is a REVISION CYCLE — relocking it moves the harness, which stales every
+member's pin of it, and no relock order reaches a fixed point.
+
+That is one instance of where a cross-library oracle may live. An oracle over subjects `S` hosted at
+`h` adds an edge from `h` to each member of `S ∖ {h}`, so it is **admissible at `h` only if no
+member of `S ∖ {h}` reaches `h`** — the edges would otherwise close a cycle, against ADR-0037's *"there
+are no cycles"*. Every member reaches the harness, so the harness hosts no oracle with a gen subject.
+Among admissible hosts, the one that already reaches every member of `S ∖ {h}` adds no edge; that
+choice is a **cost preference**, not a consequence of acyclicity. The gen-dispatch × gen-select
+pairing (`dispatch-select-adapter`) is therefore gen-dispatch's: its ci already pins gen-select.
 
 It reaches `mkCi` by applying `../flake.nix`'s own `outputs` to its ci inputs, never through a
 `path:..` input, which Lix refuses: the harness tests itself with itself. The

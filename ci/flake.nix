@@ -25,11 +25,12 @@
     git-hooks-nix.url = "github:cachix/git-hooks.nix";
     git-hooks-nix.inputs.nixpkgs.follows = "nixpkgs";
 
-    # gen-prelude ENTERS HERE AND ONLY HERE — the test plane. The agreement suite compares the
-    # vendored hasInfix (../prelude.nix) against the original, so the duplication is checked rather
-    # than trusted. No consumer pins this flake, so the edge fans to nobody: nothing downstream
-    # gains a gen-prelude node, and no consumer can end up with two builds of it.
-    gen-prelude.url = "github:sini/gen-prelude";
+    # NO GEN LIBRARY ENTERS HERE EITHER. Every member's ci pins this repository, so a gen input on
+    # this plane is a REVISION CYCLE: relocking it moves this repository, which stales every
+    # member's pin of it, and no visit order reaches a fixed point (den-hoag-lock-currency-ruling-ez1yq).
+    # The vendored hasInfix is held to nixpkgs `lib.hasInfix` — the reference gen-prelude's own
+    # fidelity suite holds the original to — and the gen-dispatch × gen-select pairing is tested
+    # in gen-dispatch's ci, which already pins gen-select. `tests/no-gen-inputs.nix` holds it.
 
     # The error plane's three ENGINES (`error-plane-engines.nix`), each at the release `evaluators.yml`
     # pins for its column and with no `follows`, so the out path is the one the column installs.
@@ -37,14 +38,6 @@
     nix-upstream.url = "github:NixOS/nix/2.35.2";
     nix-determinate.url = "github:DeterminateSystems/nix-src/v3.23.0";
     nix-lix.url = "https://git.lix.systems/lix-project/lix/archive/2.95.3.tar.gz";
-
-    # gen-dispatch and gen-select, for the dispatch-select-adapter suite: a cross-library
-    # integration suite's subject is a PAIRING, and this is that pairing's home (see README —
-    # neither sibling becomes the other's declared dependency for it). Pinned directly here rather
-    # than through gen-dispatch's own ci, which is what let this suite's gen-select pin go stale
-    # unnoticed. Fans to nobody downstream, same as gen-prelude above.
-    gen-dispatch.url = "github:sini/gen-dispatch";
-    gen-select.url = "github:sini/gen-select";
 
     # nixpkgs is the test runner's dependency (nix-unit, treefmt) and supplies the `lib` the suites
     # use. The harness root declares its own; this one is the consumer-side declaration mkCi reads.
@@ -77,17 +70,7 @@
       testModules = ./tests;
       # `genPrelude` is NOT passed: mkCi supplies it, and the vendored copy it supplies is exactly
       # what the agreement suite is about — overriding it here would test a value no consumer gets.
-      specialArgs = {
-        upstreamPrelude = inputs.gen-prelude.lib;
-        # The original's SOURCE as well as its value: the escape set is compared as text, because a
-        # set has members no case table reaches.
-        upstreamSrc = inputs.gen-prelude;
-        # gen-dispatch's own flake wires gen-prelude into `lib` already, so this is the fully built
-        # library — the same value a consumer pinning gen-dispatch directly would get.
-        genDispatch = inputs.gen-dispatch.lib;
-        genSelect = inputs.gen-select.lib;
-      };
-      # The `]` cells' `expr` ABORTS the moment `]` re-enters either escape set, and the batch
+      # The `]` cells' `expr` ABORTS the moment `]` enters the vendored escape set, and the batch
       # asserter behind `checks.default` cannot hold that — it forces every `expr` under
       # `flake.tests`. Those cells live on a second output instead.
       #

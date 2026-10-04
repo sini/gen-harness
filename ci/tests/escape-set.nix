@@ -21,19 +21,19 @@
 # behind `checks.default` rather than fail. It is on `../tests-error.nix`'s `testsError` output.
 {
   genPrelude,
-  upstreamPrelude,
-  upstreamSrc,
   lib,
   ...
 }:
 let
-  # Each cell answers twice: the vendored copy and the original, which must agree with each other
-  # and with the stated answer. Agreement alone would accept two copies broken the same way; a
-  # stated answer alone would not notice the copy drifting from what it is a copy OF.
+  # Each cell answers twice: the vendored copy and nixpkgs `lib.hasInfix`, the reference it is a
+  # drop-in for, which must agree with each other and with the stated answer — gen-prelude's
+  # `escCell` shape, which holds the original to the same reference. Agreement alone would accept
+  # two copies broken the same way; a stated answer alone would not notice the copy drifting from
+  # what it is a copy OF.
   agree = needle: haystack: answer: {
     expr = {
       vendored = genPrelude.hasInfix needle haystack;
-      upstream = upstreamPrelude.hasInfix needle haystack;
+      upstream = lib.hasInfix needle haystack;
     };
     expected = {
       vendored = answer;
@@ -48,10 +48,8 @@ let
   # single-character entry can produce, whatever the set's membership becomes.
   escapeBlock = src: lib.head (lib.splitString "];" (lib.last (lib.splitString "metachars = [" src)));
   quoteCount = s: (lib.length (lib.splitString "\"" s)) - 1;
-  squeeze = s: lib.replaceStrings [ " " "\n" ] [ "" "" ] s;
 
   vendoredBlock = escapeBlock (builtins.readFile ../../prelude.nix);
-  upstreamBlock = escapeBlock (builtins.readFile "${upstreamSrc}/lib/default.nix");
 in
 {
   flake.tests.escape-set = {
@@ -99,21 +97,13 @@ in
     # Twelve cells above, one per member, and the set is twelve. If this count moves, either a
     # member arrived without a cell or `]` came back — both stale the coverage claim above.
     test-set-has-twelve-members = {
-      expr = {
-        vendored = (quoteCount vendoredBlock) / 2;
-        upstream = (quoteCount upstreamBlock) / 2;
-      };
-      expected = {
-        vendored = 12;
-        upstream = 12;
-      };
+      expr = (quoteCount vendoredBlock) / 2;
+      expected = 12;
     };
 
-    # The copy is faithful at the source level too, not only where a case table happens to look.
-    # A member the original adds or drops shows up here as a text difference, naming itself.
-    test-set-is-the-original-verbatim = {
-      expr = squeeze vendoredBlock;
-      expected = squeeze upstreamBlock;
-    };
+    # The copy agrees with nixpkgs over the WHOLE domain, not only where this table looks — a
+    # member ADDED, which no per-member cell can name in advance, is `../tests-error.nix`'s
+    # `test-set-agrees-with-nixpkgs-over-the-domain`: an added member mostly ABORTS (`\d` is not a
+    # valid regex to the engine), so that cell can abort and lives on the second output.
   };
 }

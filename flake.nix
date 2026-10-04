@@ -10,9 +10,10 @@
   # NO gen library input appears here, and that absence is the point of this repository: a library's
   # test harness must not depend on the aggregator that pins the library. The one function the
   # harness needs from gen-prelude is vendored (./prelude.nix), so a consumer's lock gains no gen
-  # node from the harness and no library is built twice in one evaluation. The agreement test that
-  # keeps the vendored copy honest declares gen-prelude in ./ci — the test plane, which no consumer
-  # pins.
+  # node from the harness and no library is built twice in one evaluation. ./ci declares none either:
+  # every member's ci pins this repository, so a gen input there is a revision cycle. The agreement
+  # test that keeps the vendored copy honest holds it to nixpkgs `lib.hasInfix`, the reference
+  # gen-prelude's own fidelity suite holds the original to.
   inputs = {
     nixpkgs.url = "https://channels.nixos.org/nixos-unstable/nixexprs.tar.xz";
     flake-parts.url = "github:hercules-ci/flake-parts";

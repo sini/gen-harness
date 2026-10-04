@@ -173,87 +173,6 @@
         "type": "github"
       }
     },
-    "gen-algebra": {
-      "locked": {
-        "lastModified": 1787242575,
-        "narHash": "sha256-swj/IP8UAi/iSY1AxJkMZob+h3+90fKRA/Au3d/dZUg=",
-        "owner": "sini",
-        "repo": "gen-algebra",
-        "rev": "5afecc7f768c964ee8a989ab370ff514751e1a43",
-        "type": "github"
-      },
-      "original": {
-        "owner": "sini",
-        "repo": "gen-algebra",
-        "type": "github"
-      }
-    },
-    "gen-dispatch": {
-      "inputs": {
-        "gen-prelude": "gen-prelude"
-      },
-      "locked": {
-        "lastModified": 1789702045,
-        "narHash": "sha256-TWQfPRAPVPGqcvkh3qyjIE4pZKHrNiO79h8ZXKzJEiM=",
-        "owner": "sini",
-        "repo": "gen-dispatch",
-        "rev": "0f7003661f9b89261ca98957dd18fe206143c3b5",
-        "type": "github"
-      },
-      "original": {
-        "owner": "sini",
-        "repo": "gen-dispatch",
-        "type": "github"
-      }
-    },
-    "gen-prelude": {
-      "locked": {
-        "lastModified": 1782849654,
-        "narHash": "sha256-RuSmZU9Sny31YFYfPkagesMDKqGgkQQoNrm4O5Imw2c=",
-        "owner": "sini",
-        "repo": "gen-prelude",
-        "rev": "9e3f4c947c76a11ffec04e020ac7e2a3fe306c47",
-        "type": "github"
-      },
-      "original": {
-        "owner": "sini",
-        "repo": "gen-prelude",
-        "type": "github"
-      }
-    },
-    "gen-prelude_2": {
-      "locked": {
-        "lastModified": 1789593591,
-        "narHash": "sha256-PHqnffcJ2mUDEYrQieDdGOtTHIY3gr6AYkRpuE6mdRQ=",
-        "owner": "sini",
-        "repo": "gen-prelude",
-        "rev": "ecc1f00367300cce7506e39847dd0c313f0efae7",
-        "type": "github"
-      },
-      "original": {
-        "owner": "sini",
-        "repo": "gen-prelude",
-        "type": "github"
-      }
-    },
-    "gen-select": {
-      "inputs": {
-        "gen-algebra": "gen-algebra"
-      },
-      "locked": {
-        "lastModified": 1789594737,
-        "narHash": "sha256-IcKnM/++n7RUslurJABPaCTgezY1JqydkSLD6viw/GY=",
-        "owner": "sini",
-        "repo": "gen-select",
-        "rev": "21621b13bbcfe6d7f4725aee841f34956cfb2164",
-        "type": "github"
-      },
-      "original": {
-        "owner": "sini",
-        "repo": "gen-select",
-        "type": "github"
-      }
-    },
     "git-hooks-nix": {
       "inputs": {
         "flake-compat": "flake-compat",
@@ -699,9 +618,6 @@
         "devshell": "devshell",
         "flake-parts": "flake-parts",
         "flake-root": "flake-root",
-        "gen-dispatch": "gen-dispatch",
-        "gen-prelude": "gen-prelude_2",
-        "gen-select": "gen-select",
         "git-hooks-nix": "git-hooks-nix",
         "import-tree": "import-tree",
         "nix-determinate": "nix-determinate",
