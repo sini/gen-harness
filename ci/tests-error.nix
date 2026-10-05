@@ -261,6 +261,18 @@ in
       };
     };
 
+    # The runner's innermost-message read (`error-plane-runner.py`, `errmsg`): a refusal whose own
+    # text carries `error: ` is read whole, never cut at that inner occurrence to its tail. Read under
+    # nix-unit this cell is green whatever the runner does; the runner planes are its discriminating
+    # half.
+    flake.testsError.error-plane-runner.test-a-message-containing-the-error-marker-is-read-whole = {
+      expr = throw "gen-harness-fixture: unexpected validation error: \"s\"";
+      expectedError = {
+        type = "ThrownError";
+        msg = "^gen-harness-fixture: unexpected validation error: \"s\"$";
+      };
+    };
+
     flake.testsError.escape-set = {
       # The answer is asserted, not merely the absence of an abort: `]` is passed through unescaped
       # and matched as the literal it already is, so the boolean is nixpkgs'.

@@ -14,9 +14,10 @@
 # batching expression can hold a cell that aborts.
 #
 # ★ THE PASS PREDICATE. An `expected` cell passes on rc 0 printing `true`. An `expectedError` cell
-# passes on rc != 0 when its `msg` matches (Python `re.search`) the INNERMOST message: the text after
-# the LAST `error: ` marker, with the 7-space continuation indentation stripped from every following
-# line. That strip is not cosmetic — read literally, the multi-line `^...$` messages fail 11 correct
+# passes on rc != 0 when its `msg` matches (Python `re.search`) the INNERMOST message: with the 7-space
+# continuation indentation stripped from every line, the text from the LAST line that BEGINS `error: `.
+# A marker inside a message is not a boundary: a refusal reading `…: unexpected validation error: "s"`
+# is read whole, never cut to its tail (den-hoag-25dd7). That strip is not cosmetic — read literally, the multi-line `^...$` messages fail 11 correct
 # gen-merge cells (145 -> 134; gate den-hoag-lbtnv C4). `expectedError.type` is NOT checked: the CLI
 # does not print the error class. The `nix` column keeps nix-unit for that.
 #
@@ -63,11 +64,12 @@ else builtins.deepSeq c.expr (builtins.deepSeq c.expected (c.expr == c.expected)
 
 
 def errmsg(err):
-    i = err.rfind("error: ")
-    if i < 0:
+    lines = [ln[7:] if ln.startswith("       ") else ln for ln in err.rstrip().split("\n")]
+    starts = [i for i, ln in enumerate(lines) if ln.startswith("error: ")]
+    if not starts:
         return err
-    lines = err[i + len("error: "):].rstrip().split("\n")
-    return "\n".join([lines[0]] + [ln[7:] if ln.startswith("       ") else ln for ln in lines[1:]])
+    i = starts[-1]
+    return "\n".join([lines[i][len("error: "):]] + lines[i + 1:])
 
 
 def nix_eval(env, expr):
