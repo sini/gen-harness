@@ -723,8 +723,8 @@ pkgs.writeShellApplication {
     #   old-pin copy is REVERTED by the OLD formatter. It cannot land ahead of the bump; it rides
     #   with it, which is here.
     #
-    #   THE HOOK. `.pre-commit-config.yaml` is a MATERIALISED STORE PATH fixed at devshell entry,
-    #   and its `treefmt` entry keeps pointing at the OLD formatter after a bump — so it silently
+    #   THE HOOK. The commit hook bakes its config's STORE PATH at devshell entry
+    #   (`staged-commit-hook.nix`), and that config's `treefmt` entry keeps pointing at the OLD formatter after a bump — so it silently
     #   REVERTS exactly what CI now requires, with both tools reporting success on their own
     #   terms and the commit failing for a reason neither names. Measured three times in three
     #   repositories (gen-memo 10998 -> 10978, gen-merge 12862 -> 12850). Re-entering the devshell

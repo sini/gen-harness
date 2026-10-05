@@ -131,5 +131,11 @@
     # a consumer cannot drift from the published surface by construction rather than by
     # discipline. `{ pkgs, name, sourceRoot, roots }` -> the guard derivation (`den-hoag-g2glu`).
     lib.readRootsGuard = import ./read-roots-guard.nix;
+
+    # The commit hook AND its installer, published for the same non-mkCi consumer: a hub carrying
+    # the hook text without the slot writer would keep pre-commit's stashing shim in the slot.
+    # `flakeModule.nix` imports the same file. `{ pkgs, package, configFile, chained ? [ ] }` ->
+    # `{ hook; install; }` (den-hoag-commit-hook-stash-shared-checkout-ddjy2).
+    lib.stagedCommitHook = import ./staged-commit-hook.nix;
   };
 }

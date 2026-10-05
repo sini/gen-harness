@@ -44,6 +44,8 @@ let
   mdformatExtra = config.gen.ci.mdformat.extraPlugins;
   # Bound HERE for the same reason as `mdformatExtra` above: `perSystem`'s own `config` shadows.
   sheetDeclared = config.gen.ci.agentsMd.sheet;
+  # Bound HERE for the same reason again, and read by the commit hook below.
+  commitHookChained = config.gen.ci.commitHook.chained;
   # Bound HERE for the same reason again, and read by both the check and the generated cells.
   rootSurface = import ./root-surface.nix;
   rsEntry = config.gen.ci.rootSurface.entry;
@@ -147,6 +149,20 @@ in
       non-empty and no citation region is read from it. Declare it in
       the same commit as the harness bump that brings this option: a declaration ahead of its
       bump is an undefined option and fails every output of this ci at evaluation, `tests` too.
+    '';
+  };
+
+  options.gen.ci.commitHook.chained = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [ ];
+    example = [ "STATUS/handoff-gate.sh" ];
+    description = ''
+      Worktree-relative executables the commit hook runs before it checks the staged tree, in the
+      real checkout with git's hook environment intact; a non-zero exit refuses the commit. Each
+      must only read the checkout. This is where a command once prepended to
+      `.git/hooks/pre-commit` by hand is declared: the hook is written whole at every devshell
+      entry (`staged-commit-hook.nix`), so a hand edit does not survive. Declare it in the same
+      commit as the harness bump that brings this option.
     '';
   };
 
@@ -393,6 +409,15 @@ in
 
         processPlaneCmd = import ./process-plane.nix { inherit pkgs name; };
 
+        # The commit hook and its slot writer, PUBLISHED (`flake.nix`'s `lib.stagedCommitHook`) so
+        # the hub installs the same construction. git-hooks.nix keeps generating the config
+        # (`settings.install.enable = false` below) and installs nothing.
+        stagedHook = import ./staged-commit-hook.nix {
+          inherit pkgs;
+          inherit (config.pre-commit.settings) package configFile;
+          chained = commitHookChained;
+        };
+
         # The error plane as CHECKS, judged by message by the column's own evaluator
         # (`error-plane-check.nix`). A DECLARER only — `planeDeclared`, the flake-level predicate,
         # which the `ci-error` hook below also keys on — because the check builds its evaluator
@@ -420,6 +445,9 @@ in
         # Pre-commit hooks: format check + unit tests
         pre-commit = {
           check.enable = false;
+          # The config is generated; the hook that runs it is `stagedHook`, never pre-commit's
+          # stashing shim. Installing both would make the two installers fight over one slot.
+          settings.install.enable = false;
           settings.hooks = {
             treefmt = {
               enable = true;
@@ -578,90 +606,16 @@ in
         '';
 
         devshells.default = {
-          # The installer's LAST ACT writes `core.hooksPath` RELATIVE to the working-tree top-level
-          # (git-hooks.nix's `installationScript` strips `$GIT_WC/` off the absolute common dir). Git
-          # resolves a relative value against the top-level, and in a LINKED WORKTREE that is the
-          # worktree, whose `.git` is a POINTER FILE — so `.git/hooks` names nothing, git finds no
-          # hooks and runs none, REPORTING NOTHING. The commit then succeeds ungated. This is the
-          # same worktree fact `projectRootFile = null` above exists for, on the hook path instead of
-          # the tree-root path.
+          # The commit hook's slot writer (`staged-commit-hook.nix`), which also removes the two
+          # artefacts the old installer left in every checkout: a relative `core.hooksPath` and the
+          # retired post-checkout provisioner.
           #
-          # REMOVED rather than corrected to an absolute path: git's own default already resolves
-          # hooks to the common dir in every worktree, so the setting is redundant where it works and
-          # wrong where it does not. Deletion leaves no value to maintain and nothing to break when a
-          # checkout moves.
-          #
-          # ANNOUNCED because `--unset-all` distinguishes REMOVED (0) from ABSENT (5), and a setting
-          # that disappears without saying so is the defect class this line exists to close.
-          # The `if` form rather than `|| true`: the removal's exit status is the condition, so it is
-          # read rather than discarded, and it is safe under `set -e`.
-          #
-          # THE INSTALLER WRITES TO STDERR, never stdout: on a checkout's first entry it prints the
-          # config path and `pre-commit installed at …`, and `nix develop --command X > f` would capture
-          # them as X's output. A CI runner is always a first entry, so the process plane's
-          # `--userns-binaries > file` step read the config path as a binary and refused it
-          # (den-hoag-o7kjc F1).
+          # STDERR, never stdout: `nix develop --command X > f` would capture what it prints as X's
+          # output. A CI runner is always a first entry, so the process plane's
+          # `--userns-binaries > file` step read the old installer's output as a binary and refused
+          # it (den-hoag-o7kjc F1).
           devshell.startup.git-hooks.text = ''
-            {
-              ${config.pre-commit.installationScript}
-            } 1>&2
-            if ${lib.getExe config.pre-commit.settings.gitPackage} config --local --unset-all core.hooksPath; then
-              echo 1>&2 "gen-harness: removed core.hooksPath - git's default already resolves hooks to the common dir, and the relative value the installer writes is unreachable from a linked worktree."
-            fi
-
-            # A LINKED WORKTREE'S .pre-commit-config.yaml IS NEVER WRITTEN: the installer above only
-            # ever runs inside the checkout that entered THIS devshell, and `git worktree add` never
-            # enters one. With core.hooksPath correctly unset (above), the shared hook DOES reach the
-            # worktree -- finds no config -- and ABORTS every commit there. Loud, not silent, but it
-            # blocks every legitimate worktree commit until someone remembers a manual `nix develop`.
-            # Written at the COMMON dir because worktrees SHARE hooks; there is only one slot to fill.
-            #
-            # `post-checkout` is a slot NO CONSUMER CONFIGURES TODAY (census: 0 of 31 `mkCi`
-            # consumers declare a `post-checkout` stage) -- not, as first drafted, a slot upstream
-            # never writes to: its own uninstall loop and install switch both name this exact slot
-            # (git-hooks.nix modules/supported-hooks.nix), so the first consumer that configures one
-            # would have this hook clobbered, written after `installationScript` in the same string.
-            # The `# gen-harness` line inside the written hook below is this file naming itself, the
-            # same way upstream's own uninstall discriminates its hooks from foreign ones.
-            #
-            # GUARDED against running with no repository at all underfoot (a tarball checkout, a
-            # sandboxed build, any non-repo cwd): unguarded, `git rev-parse --git-common-dir` fails
-            # loud, and under the devshell entrypoint's `set -euo pipefail` that ABORTS DEVSHELL ENTRY
-            # OUTRIGHT rather than merely skipping this block.
-            if common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null); then
-              # WRITTEN VIA mktemp + `mv -f`, NEVER `cat >` DIRECTLY ONTO THE HOOK PATH: this hook is
-              # what invokes `nix develop` in the first place, so a direct overwrite truncates and
-              # rewrites the very file the running interpreter is mid-way through reading -- bash
-              # resumes at a stale byte offset into different text the moment a checked-out branch
-              # carries a longer or shorter version of this block than the one already running. A
-              # same-directory rename swaps the inode instead, leaving the running read untouched.
-              tmp=$(mktemp "$common_dir/hooks/.post-checkout.XXXXXX")
-              cat > "$tmp" <<'POSTCHECKOUT'
-            #!/usr/bin/env bash
-            # gen-harness: materialises a linked worktree's pre-commit config on checkout.
-            set -uo pipefail
-            common_dir=$(git rev-parse --path-format=absolute --git-common-dir)
-            git_dir=$(git rev-parse --path-format=absolute --git-dir)
-            toplevel=$(git rev-parse --show-toplevel)
-            # Ordinary checkout in the MAIN tree: git-dir already IS the common dir. Nothing to do.
-            if [ "$git_dir" = "$common_dir" ]; then exit 0; fi
-            # Already provisioned (a later checkout inside an already-materialised worktree): no-op.
-            if [ -e "$toplevel/.pre-commit-config.yaml" ]; then exit 0; fi
-            # Not (or not yet, on this branch) an mkCi consumer: nothing this hook can provision.
-            if [ -f "$toplevel/ci/flake.nix" ]; then
-              echo "post-checkout: materialising .pre-commit-config.yaml for linked worktree $toplevel" >&2
-              # GUARDED: `git worktree add` has already created and registered the worktree by the
-              # time this hook runs, so a provisioning failure must only warn, not fail the primitive
-              # git operation that is already done.
-              if ! ( cd "$toplevel/ci" && nix develop -c true ); then
-                echo "post-checkout: FAILED to provision the pre-commit config for $toplevel -- enter its ci devshell by hand before committing" >&2
-              fi
-            fi
-            exit 0
-            POSTCHECKOUT
-              chmod +x "$tmp"
-              mv -f "$tmp" "$common_dir/hooks/post-checkout"
-            fi
+            ${stagedHook.install} 1>&2
           '';
 
           packages = [

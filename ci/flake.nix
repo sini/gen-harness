@@ -81,11 +81,14 @@
       # `process-plane-guard.nix` adds a flake CHECK: the `ci --tests-process` closure guard's exit
       # codes and messages over real fixture closures. `agents-md-sheet-arms.nix` adds a flake CHECK
       # too: `agents-md-citations`'s declaration arms, run as the shipped builder over fixture roots.
+      # `staged-commit-hook.nix` adds a flake CHECK: the published commit hook and its writer, run over
+      # git fixtures in the sandbox with an exact cell count.
       extraModules = [
         ./tests-error.nix
         ./tests-process.nix
         ./process-plane-guard.nix
         ./read-roots-guard.nix
+        ./staged-commit-hook.nix
         ./agents-md-sheet-arms.nix
         # The harness publishes no root `default.nix`; its surface is the flake's `lib`.
         { gen.ci.rootSurface.entry = "not-owed"; }
