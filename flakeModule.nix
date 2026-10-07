@@ -217,14 +217,12 @@ in
     '';
   };
 
-  # The consumer's DECLARED EXAMPLES. ★ ADOPTION WINDOW: the default `null` is "not yet adopted"
-  # and generates no suite, so publishing this option reds no consumer that has not declared it;
-  # any declaration, `{ }` included, arms totality. The window closes when the default becomes
-  # `{ }`, the same declared-obligation shape as rootSurface above, once every roster member with
-  # an `examples/` directory declares (den-hoag-qaa7o, spec §2.7).
+  # The consumer's DECLARED EXAMPLES. The default is `{ }`, the same declared-obligation shape as
+  # rootSurface above: a consumer that declares nothing still has every directory under `examples/`
+  # held by totality, and no value switches the suite off (den-hoag-pk6bn, guard spec §2.7.3).
   options.gen.ci.examples = lib.mkOption {
-    type = lib.types.nullOr (lib.types.attrsOf lib.types.raw);
-    default = null;
+    type = lib.types.attrsOf lib.types.raw;
+    default = { };
     description = ''
       One value per directory under `examples/`: `<dir> = <value>`, usually the example's `outputs`
       applied to this suite's own library values, so the example runs on the working tree and never
@@ -237,10 +235,9 @@ in
       `/examples/<dir>/flake.lock`, this suite holds both in the cell
       `test-<dir>-integration-lock-is-not-committed`, and `relock` forces the value over a fresh
       lock with every node that is this repository grafted onto the working tree
-      (`examplesAtRelock`). The default `null` is a consumer that has not
-      adopted the guard yet and gets no suite, so a bare harness bump reds no consumer; any
-      declaration, `{ }` included, arms the suite. A later harness revision makes `{ }` the
-      default and drops `null`, after which no value switches the suite off.
+      (`examplesAtRelock`). The default is `{ }`, so an undeclared directory under `examples/` reds
+      totality; no value switches the suite off, and a directory the suite must not evaluate is
+      named in `gen.ci.examplesExcluded`.
     '';
   };
 

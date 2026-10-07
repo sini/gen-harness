@@ -4,7 +4,7 @@
 # its `expr` failing under `tryEval`, read here as a value so this suite stays green while showing
 # the guard fires. `clean/` carries `examples/alpha`, `examples/beta` and a plain file the totality
 # cell must not count; the fixture root itself carries no `examples/`.
-{ lib, ... }:
+{ inputs, lib, ... }:
 let
   guard = import ../../examples-guard.nix { inherit lib; };
   fx = ./_fixtures/examples-guard;
@@ -67,14 +67,35 @@ in
       };
     };
 
-    # The adoption window: an undeclared consumer gets no suite even over `examples/`; the
-    # control is the same tree declared `{ }`, which reds totality.
-    test-an-unadopted-consumer-is-no-suite-over-examples = {
-      expr = suite null;
-      expected = { };
-    };
     test-control-a-declared-empty-set-over-examples-reds-totality = {
       expr = (suite { }).test-every-example-directory-is-declared;
+      expected = {
+        expr = [
+          "alpha"
+          "beta"
+        ];
+        expected = [ ];
+      };
+    };
+
+    # THE DEFAULT IS THE GUARD. Every other cell here hands `guard.cells` an explicit `declared`;
+    # this one applies `mkCi` to a consumer over `clean/` with NO `gen.ci.examples` definition, so it
+    # reads the option's default through the module. The consumer is undeclared, and its totality
+    # cell is present and red.
+    test-an-undeclared-consumer-over-examples-reds-totality = {
+      expr =
+        (inputs.gen-harness.lib.mkCi {
+          inputs = {
+            inherit (inputs) nixpkgs gen-harness;
+            self = {
+              outPath = clean;
+              sourceInfo.outPath = clean;
+            };
+          };
+          name = "fixture";
+          testModules = ./_fixtures/plane/none;
+          extraModules = [ { gen.ci.rootSurface.entry = "not-owed"; } ];
+        }).tests.gen-ci-examples.test-every-example-directory-is-declared or null;
       expected = {
         expr = [
           "alpha"
@@ -229,12 +250,12 @@ in
       };
     };
 
-    # An exclusion arms the guard as a declaration does: an unadopted `null` beside it is `{ }`.
+    # An exclusion is counted by totality beside an empty declaration.
     test-an-exclusion-alone-arms-totality = {
       expr =
         (guard.cells {
           root = clean;
-          declared = null;
+          declared = { };
           excluded.beta = {
             row = "den-hoag-tyu25";
             reason = "r";

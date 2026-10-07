@@ -137,18 +137,15 @@ evaluated at that lock with every node that is this repository (any depth, match
 `ci-self-input` scanner matches) replaced by the working tree, built from the tree's own root
 lock. The cells are the flake output `examplesAtRelock`, and `relock` reads nothing else.
 
+The option defaults to `{ }`, so every consumer is held: a directory under `examples/` that is
+neither declared nor excluded reds the totality cell, and no value switches the suite off. A
+consumer with no `examples/` directory, nothing declared and nothing excluded gets no suite.
+
 The scanner's match is published as one rule, `lock-node.nix`: which repository a lock node's `locked`
 attributes name, `locked.repo`, else a `git` node's last `locked.url` segment without `.git`, else
 `null`. A test module takes it as the module argument `lockedRepo` (`locked -> string | null`), and
 a reader outside `mkCi`, such as the hub's ci, takes `gen-harness.lib.lockedRepo`. The scanner and
 `relock` read the same rule as a jq `def`.
-
-The suite is adopted per consumer. The option defaults to `null`, meaning not yet adopted, and a
-consumer at that default gets no suite, so bumping the harness reds nobody. Any declaration arms
-it, `gen.ci.examples = { };` or any exclusion included, and from then on every directory under `examples/` must be
-declared. Once every consumer has declared, a later harness revision makes `{ }` the default and
-removes `null`, so the suite can no longer be switched off; a consumer with an undeclared
-`examples/` directory then reds at its harness bump.
 
 ### The declared read domain
 
