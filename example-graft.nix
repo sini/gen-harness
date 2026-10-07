@@ -75,27 +75,8 @@ let
     else
       spec;
 
-  last = xs: builtins.elemAt xs (builtins.length xs - 1);
-  removeSuffix =
-    sfx: str:
-    let
-      n = builtins.stringLength sfx;
-      m = builtins.stringLength str;
-    in
-    if m >= n && builtins.substring (m - n) n str == sfx then builtins.substring 0 (m - n) str else str;
-
-  # The scanner's identity. A `path` node names no repository.
-  repoOf =
-    node:
-    let
-      l = node.locked or { };
-    in
-    if l ? repo then
-      l.repo
-    else if (l.type or "") == "git" && l ? url then
-      last (builtins.split "/" (removeSuffix ".git" l.url))
-    else
-      null;
+  # The scanner's identity (`lock-node.nix`). A `path` node names no repository.
+  repoOf = node: (import ./lock-node.nix).lockedRepo (node.locked or { });
   isParentNode = node: repoOf node == name;
 
   # repository -> its non-root node keys in one lock.

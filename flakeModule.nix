@@ -282,6 +282,9 @@ in
     # git-filtered source this suite reads holds no lock to graft.
     _module.args.exampleAtOwnLock = examplesGuard.exampleAtOwnLock;
 
+    # The repository a lock node names (`lock-node.nix`), the scanner's rule, for every entry cell.
+    _module.args.lockedRepo = (import ./lock-node.nix).lockedRepo;
+
     # The integration examples' cells, read only by `relock`'s integration step over a scratch copy
     # that carries the fresh locks (`path:<copy>?dir=ci#examplesAtRelock`). Always present, `{ }`
     # with nothing declared, so the step's cross-check reads a missing declaration as a named
