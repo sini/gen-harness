@@ -99,7 +99,7 @@ in
   relockCells =
     { declared, flakeOf }:
     lib.mapAttrs (n: v: valueCells n (v.select (flakeOf v.dir))) (
-      lib.filterAttrs (_: isIntegration) (if declared == null then { } else declared)
+      lib.filterAttrs (_: isIntegration) declared
     );
 
   # The read root `mkCi` adds when the evaluated source carries `examples/`, so `ci`'s git-unknown
@@ -109,67 +109,63 @@ in
   readRoot = root: lib.optional (builtins.pathExists (root + "/examples")) (root + "/examples");
 
   # `{ root, declared, excluded }` -> the `gen-ci-examples` suite, `{ }` when there is nothing to
-  # hold. `declared = null` with nothing excluded is a consumer that has not adopted the guard: no
-  # suite. Any exclusion arms it, as any declaration does.
+  # hold: no `examples/`, nothing declared and nothing excluded. A consumer that declares nothing
+  # declares `{ }`, so a directory under `examples/` reds totality.
   cells =
     {
       root,
       declared,
       excluded ? { },
     }:
-    if declared == null && excluded == { } then
-      { }
-    else
-      let
-        declared' = if declared == null then { } else declared;
-        dir = root + "/examples";
-        present = builtins.pathExists dir;
-        onDisk = lib.optionals present (
-          builtins.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir dir))
-        );
-        blank = s: builtins.match "[[:space:]]*" s != null;
-      in
-      lib.optionalAttrs (present || declared' != { } || excluded != { }) (
+    let
+      dir = root + "/examples";
+      present = builtins.pathExists dir;
+      onDisk = lib.optionals present (
+        builtins.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir dir))
+      );
+      blank = s: builtins.match "[[:space:]]*" s != null;
+    in
+    lib.optionalAttrs (present || declared != { } || excluded != { }) (
+      {
+        test-every-example-directory-is-declared = {
+          expr = onDisk;
+          expected = lib.sort lib.lessThan (builtins.attrNames declared ++ builtins.attrNames excluded);
+        };
+      }
+      // lib.concatMapAttrs (
+        n: e:
+        let
+          row = e.row or "";
+        in
         {
-          test-every-example-directory-is-declared = {
-            expr = onDisk;
-            expected = lib.sort lib.lessThan (builtins.attrNames declared' ++ builtins.attrNames excluded);
+          "test-${n}-excluded-citing-${if blank row then "no-row" else row}" = {
+            expr =
+              lib.optional (blank row) "names no tracking row"
+              ++ lib.optional (blank (e.reason or "")) "states no reason"
+              ++ lib.optional (!builtins.elem n onDisk) "examples/${n} is not a directory on disk"
+              ++ lib.optional (declared ? ${n}) "is also declared in gen.ci.examples";
+            expected = [ ];
           };
         }
-        // lib.concatMapAttrs (
-          n: e:
-          let
-            row = e.row or "";
-          in
+      ) excluded
+      // lib.concatMapAttrs (
+        n: v:
+        if isIntegration v then
           {
-            "test-${n}-excluded-citing-${if blank row then "no-row" else row}" = {
+            "test-${n}-integration-lock-is-not-committed" = {
               expr =
-                lib.optional (blank row) "names no tracking row"
-                ++ lib.optional (blank (e.reason or "")) "states no reason"
-                ++ lib.optional (!builtins.elem n onDisk) "examples/${n} is not a directory on disk"
-                ++ lib.optional (declared' ? ${n}) "is also declared in gen.ci.examples";
+                lib.optional (builtins.pathExists (
+                  dir + "/${n}/flake.lock"
+                )) "examples/${n}/flake.lock is committed"
+                ++ lib.optional (
+                  !builtins.elem "/examples/${n}/flake.lock" (readLines (root + "/.gitignore"))
+                ) "the root .gitignore lacks the exact line /examples/${n}/flake.lock"
+                ++ lib.optional (v.dir != n) "declared as ${n} but grafts examples/${v.dir}";
               expected = [ ];
             };
           }
-        ) excluded
-        // lib.concatMapAttrs (
-          n: v:
-          if isIntegration v then
-            {
-              "test-${n}-integration-lock-is-not-committed" = {
-                expr =
-                  lib.optional (builtins.pathExists (
-                    dir + "/${n}/flake.lock"
-                  )) "examples/${n}/flake.lock is committed"
-                  ++ lib.optional (
-                    !builtins.elem "/examples/${n}/flake.lock" (readLines (root + "/.gitignore"))
-                  ) "the root .gitignore lacks the exact line /examples/${n}/flake.lock"
-                  ++ lib.optional (v.dir != n) "declared as ${n} but grafts examples/${v.dir}";
-                expected = [ ];
-              };
-            }
-          else
-            valueCells n v
-        ) declared'
-      );
+        else
+          valueCells n v
+      ) declared
+    );
 }
