@@ -248,12 +248,8 @@ pkgs.writeShellApplication {
     # repository, one per line. Used for `ci/flake.lock` and for each example lock alike.
     carriersIn() {
       jq -r --arg repo "$2" '
-        def repoOf($d; $n):
-          ($d.nodes[$n].locked // {}) as $l
-          | if ($l.repo // null) != null then $l.repo
-            elif ($l.type // "") == "git" and ($l.url // null) != null
-              then ($l.url | sub("\\.git$"; "") | split("/") | last)
-            else null end;
+        ${(import ./lock-node.nix).jq}
+        def repoOf($d; $n): ($d.nodes[$n].locked // {}) | lockedRepo;
         def closure($d; $start):
           { seen: {}, todo: [$start] }
           | until((.todo | length) == 0;
@@ -548,9 +544,10 @@ pkgs.writeShellApplication {
         repo=""
         if [ "$inRoot" = yes ]; then
           repo=$(jq -r --arg i "$input" '
+            ${(import ./lock-node.nix).jq}
             . as $d
             | ($d.nodes[$d.root // "root"].inputs[$i]) as $k
-            | ($d.nodes[$k].locked.repo // "")' "$rootLock")
+            | (($d.nodes[$k].locked // {}) | lockedRepo) // ""' "$rootLock")
         fi
         if [ -f "$ciLock" ]; then
           carriers=()

@@ -39,6 +39,9 @@
     # The symbol every consuming test flake reaches.
     lib.mkCi = import ./mkCi.nix { inherit inputs; };
 
+    # The repository a lock node names (`lock-node.nix`), for readers outside the module: the hub.
+    lib.lockedRepo = (import ./lock-node.nix).lockedRepo;
+
     # The check builders and the plugin set, for a consumer that is gated by this machinery
     # without being an mkCi consumer — the gen hub's own ci is the case: it exposes flake checks
     # and a perf app rather than a nix-unit `tests` output, so it cannot take the module, but the

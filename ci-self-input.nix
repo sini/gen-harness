@@ -96,18 +96,13 @@ let
       # tree rather than a published copy, is silent here, and must stay silent.
       rc=0
       hits=$(jq -r --arg target "$target" '
+        ${(import ./lock-node.nix).jq}
         (.nodes // {})
         | to_entries[]
         | select(.value.locked != null)
         | . as $e
         | $e.value.locked as $l
-        | (
-            if ($l.repo // null) != null then $l.repo
-            elif ($l.type // "") == "git" and ($l.url // null) != null
-              then ($l.url | sub("\\.git$"; "") | split("/") | last)
-            else null
-            end
-          ) as $repo
+        | ($l | lockedRepo) as $repo
         | select($repo == $target)
         | "  node \($e.key)\ttype=\($l.type)\t\($l.owner // "?")/\($repo)\trev=\($l.rev // "-")"
       ' "$lock") || rc=$?
