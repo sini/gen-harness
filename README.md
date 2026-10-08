@@ -52,7 +52,9 @@ the harness plus the tools, with no library it did not ask for.
 A test module sets `flake.tests.<suite>.<name> = { expr; expected; };` and receives `name`,
 `genInputs`, `genPrelude` and whatever `specialArgs` adds. Suites run under
 `nix develop ./ci --command ci`, the guarded form of `nix-unit --flake ./ci#tests` (see the declared
-read domain below). A consumer that owes no `AGENTS.md` capability sheet declares it
+read domain below), which then builds every check `checks.<system>` declares except `tests-error`,
+one `nix build` per check so every failing one is named; `ci --tests-error` runs the error plane and
+then builds `checks.tests-error`. The two together are the local gate: every declared check, guarded. A consumer that owes no `AGENTS.md` capability sheet declares it
 through `extraModules` as `{ gen.ci.agentsMd.sheet = "not-owed"; }`; the `agents-md-citations`
 check then holds the tree to that declaration and refuses a sheet present beside it, while a
 consumer that declares nothing owes a sheet and is refused without one. A consumer whose root
@@ -162,7 +164,7 @@ does not also cover. It does **not** refuse on tracked-modified, tracked-deleted
 those are fully visible to the evaluator with their worktree bytes, and refusing them would reject
 every commit touching a test cell. A hand-typed `nix-unit --flake ./ci#tests` is not guarded, and
 neither is `nix flake check ./ci`: both read the git-filtered copy and report green over the cell
-they cannot see. So `nix develop ./ci --command ci` is the command to run the suites by.
+they cannot see. So `nix develop ./ci --command ci` is the command to run the suites and checks by.
 
 The refusal covers every git-unknown byte under a root, whatever its extension or name — a file the
 collector would skip, `_`-prefixed or not `.nix`, refuses too, because the root is also a read
@@ -252,7 +254,9 @@ it builds the column's own evaluator release from the harness's engine input and
 against one upstream nix-expr whatever evaluator is installed. The column's `evaluator identity`
 step refuses a run whose `nix` is not that engine's store path. The check evaluates `ci/flake.lock`
 as written, so an in-memory `--override-input` of a ci input is refused by name: write the lock to
-test a harness change against a consumer. A caller outside the declarer's flake builds the same
+test a harness change against a consumer. Move the caller's `evaluators.yml@<sha>` to the same rev
+in that act, as `relock` does: `checks.ci-plane-coverage` refuses a workflow ref that differs from the
+locked harness (`caller-ref-is-locked-harness`), and bare `ci` builds that check. A caller outside the declarer's flake builds the same
 check through `lib.checks.errorPlane`, and its `rebind` judges the plane with named root inputs
 grafted onto another lock's pins; the refusal then reads the grafted lock. The `nix` column also
 keeps the nix-unit step, which alone checks `expectedError.type`. Where
@@ -334,8 +338,8 @@ harness wires beside `ci` off the same guard. That holds whether they assert the
 (`expectedError`) or the answer that holds only while it does not happen.
 
 ```
-nix develop ./ci -c ci               # the suites, behind the read-roots guard
-nix develop ./ci -c ci --tests-error # the cells whose expr can abort, under the nix on PATH, guarded
+nix develop ./ci -c ci               # the suites, then every declared check but tests-error, guarded
+nix develop ./ci -c ci --tests-error # the cells whose expr can abort, under the nix on PATH, then checks.tests-error, guarded
 nix develop ./ci -c ci --tests-process # per-process cells (apps.<system>.tests-process), under the nix on PATH
 nix flake check                      # in ci/ — treefmt, tree-root oracle, hooks; unguarded
 nix-unit --flake ./ci#tests          # the suites, unguarded

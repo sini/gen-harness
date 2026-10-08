@@ -632,7 +632,7 @@ in
           commands = [
             {
               name = "ci";
-              help = "Run all checks, or a specific test [ci] [ci suite] [ci suite.test] [ci --tests-error] [ci --tests-process]";
+              help = "Run the suites then build every declared check but tests-error, or a specific test [ci] [ci suite] [ci suite.test] [ci --tests-error: runner, then checks.tests-error] [ci --tests-process]";
               command = ''
                 # The read-roots guard runs BEFORE nix-unit at all three invocation points the
                 # harness itself wires — this one and the two pre-commit hooks — because a hole at
@@ -651,14 +651,47 @@ in
                 # already states its directory for the same reason.
                 cd "$FLAKE_ROOT" && "${readRootsGuard}/bin/${name}-ci-read-roots" || exit $?
 
+                # The checks this flake declares, read from `checks.${system}` itself at run time —
+                # the set `nix flake check` builds — so a check a consumer adds through
+                # `extraModules` is covered without naming it here.
+                declaredChecks() {
+                  nix eval --raw "$FLAKE_ROOT/ci#checks.${system}" \
+                    --apply 'cs: builtins.concatStringsSep " " (builtins.attrNames cs)'
+                }
+                # ONE `nix build` PER CHECK, never one over the set: a single invocation stops
+                # reporting at its first evaluation error and, without `--keep-going`, at its first
+                # failed build, so its report is a lower bound. Built one at a time, every failing
+                # check is named.
+                buildChecks() {
+                  local n failed=()
+                  echo "ci: building $# declared checks: $*"
+                  for n in "$@"; do
+                    nix build --no-link "$FLAKE_ROOT/ci#checks.${system}.$n" || failed+=("$n")
+                  done
+                  [ "''${#failed[@]}" -eq 0 ] && return 0
+                  for n in "''${failed[@]}"; do echo "ci: FAILED checks.${system}.$n" >&2; done
+                  echo "ci: ''${#failed[@]} of $# declared checks failed" >&2
+                  return 1
+                }
+
                 # `ci --tests-error`: the error plane judged by the `nix` on PATH, not by the
                 # nix-expr nix-unit links — the evaluator-neutral runner a matrix column needs
                 # (`error-plane-runner.py` states its predicate). An ARGUMENT of this command rather
                 # than a command of its own, and a flag rather than a word so it can never shadow a
                 # suite name. It runs AFTER the guard above, as every wired testsError invocation
                 # must (den-hoag-a0ig9): an untracked cell file is as invisible to it as to nix-unit.
+                # It then builds `checks.tests-error`, which judges the SAME cells differently — the
+                # pinned engine, in the sandbox, over the lock as written — so a cell that depends
+                # on the host evaluator or environment passes the runner and reds CI's flake check.
+                # Both run whatever the other says; the runner's rc wins when it is non-zero.
                 if [ "''${1:-}" = "--tests-error" ]; then
-                  exec ${pkgs.python3}/bin/python3 ${./error-plane-runner.py} "$FLAKE_ROOT"
+                  rc=0
+                  ${pkgs.python3}/bin/python3 ${./error-plane-runner.py} "$FLAKE_ROOT" || rc=$?
+                  names=$(declaredChecks) || exit $?
+                  if [[ " $names " == *" tests-error "* ]]; then
+                    buildChecks tests-error || { [ "$rc" -ne 0 ] || rc=1; }
+                  fi
+                  exit "$rc"
                 fi
 
                 # `ci --tests-process`: the process plane (`apps.<system>.tests-process`) run under
@@ -683,6 +716,24 @@ in
                 nix-unit \
                   --flake "$FLAKE_ROOT/ci#$target" \
                   --gc-roots-dir "$FLAKE_ROOT/ci/.gcroots" "''${@:2}"
+
+                # Bare `ci` is the local gate, so after the suite it builds every declared check
+                # but `tests-error`, which `ci --tests-error` builds. `default` IS built although
+                # nix-unit has just run its cells: it also refuses a cell shape nix-unit counts as a
+                # pass (`MISPLACED`, above), so leaving it out leaves a hole. A targeted `ci suite`
+                # is a diagnostic and stops at the suite. `checks.default` is always declared, so an
+                # empty set is a broken read, refused rather than passed.
+                if [ -z "''${1:-}" ]; then
+                  names=$(declaredChecks) || exit $?
+                  read -r -a all <<< "$names"
+                  gate=()
+                  for n in "''${all[@]}"; do [ "$n" = tests-error ] || gate+=("$n"); done
+                  if [ "''${#gate[@]}" -eq 0 ]; then
+                    echo "ci: checks.${system} names no check to build; refusing a gate that builds nothing" >&2
+                    exit 1
+                  fi
+                  buildChecks "''${gate[@]}" || exit $?
+                fi
               '';
             }
             {
