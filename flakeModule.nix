@@ -51,6 +51,8 @@ let
   rsEntry = config.gen.ci.rootSurface.entry;
   rsRetired = config.gen.ci.rootSurface.retired;
   rsForeign = config.gen.ci.rootSurface.foreign;
+  # Bound HERE for the same reason again, and read by `ci-plane-coverage`.
+  evaluatorsDeclared = config.gen.ci.evaluators;
   examplesGuard = import ./examples-guard.nix { inherit lib; };
   examplesSuite = examplesGuard.cells {
     root = inputs.self.sourceInfo.outPath;
@@ -214,6 +216,26 @@ in
       another declared root) is refused by name, and so is any declaration beside `entry =
       "not-owed"`. The check cannot verify that a declared path is foreign; the origin is stated
       for the reader.
+    '';
+  };
+
+  # The consumer's DECLARED EVALUATORS OBLIGATION, the same declared-obligation shape as the sheet
+  # and the root surface above: the default is the invariant, so a consumer that says nothing owes
+  # `evaluators.yml`, and "not-owed" is a subject the check holds the tree to, never an off switch.
+  options.gen.ci.evaluators = lib.mkOption {
+    type = lib.types.enum [
+      "owed"
+      "not-owed"
+    ];
+    default = "owed";
+    description = ''
+      Whether this repository's CI runs through gen-harness's three-evaluator `evaluators.yml`.
+      `owed`: a repository with `.github/workflows` has a job calling it at the locked harness rev
+      (`checks.ci-plane-coverage`, `every-workflow-calls-evaluators`). `not-owed`: the repository
+      has at least one workflow, no workflow calls `evaluators.yml` at any ref, and no error plane
+      is declared, since the error plane exists to run under every evaluator; that declaration is
+      the check's subject (`evaluators-not-owed-holds`). Declare it in the same commit as the
+      harness bump that brings this option.
     '';
   };
 
@@ -585,6 +607,7 @@ in
         checks.ci-plane-coverage = import ./ci-plane-coverage.nix {
           inherit pkgs name testsError;
           root = inputs.self.sourceInfo.outPath;
+          evaluators = evaluatorsDeclared;
           # The harness THIS ci is built from, so a caller's `evaluators.yml@<sha>` is held to it.
           # `genInputs` is the harness flake's own inputs, whose `self` is the locked gen-harness.
           harnessRev = genInputs.self.sourceInfo.rev or null;

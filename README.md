@@ -77,6 +77,13 @@ declaration the walk never stops at is refused by name. The green is a statement
 declared point only (`root-surface.nix` states the scope), and the walk has no depth bound: a
 cyclic namespace reds with `max-call-depth exceeded`.
 
+`checks.ci-plane-coverage` holds a repository's CI to gen-harness's three-evaluator
+`evaluators.yml` the same way. By default it is owed: a repository with `.github/workflows` has a
+job calling it at the locked harness rev. A repository whose CI is not an evaluator matrix declares
+`{ gen.ci.evaluators = "not-owed"; }`; the check then requires at least one workflow, refuses any
+workflow that calls `evaluators.yml` at any ref, and refuses a declared error plane, whose purpose
+is to run under every evaluator.
+
 `examples/` is held the same way. Each directory under it is declared with the value the suite
 should force, `gen.ci.examples.<dir> = <value>;`, usually the example's `outputs` applied to the
 suite's own library values, so the example runs on the working tree and never on its own lock:

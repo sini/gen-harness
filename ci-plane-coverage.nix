@@ -72,9 +72,20 @@
   # another). `null` where the caller could not supply it (the hub's à-la-carte `lib.checks` route
   # today): then any remote call is refused, because the equality cannot be decided.
   harnessRev ? null,
+  # The consumer's DECLARED EVALUATORS OBLIGATION, `gen.ci.evaluators` for an mkCi consumer. The
+  # default is the invariant: a tree with a workflow directory calls `evaluators.yml`. "not-owed" is
+  # a positive declaration the check holds the tree to, never an off switch: the tree must have a
+  # workflow, none of its workflows may call `evaluators.yml`, and it may not declare an error plane.
+  evaluators ? "owed",
 }:
 let
   inherit (pkgs) lib;
+in
+assert lib.assertOneOf "ci-plane-coverage: `evaluators`" evaluators [
+  "owed"
+  "not-owed"
+];
+let
 
   # ── RUNS: the four-condition rule, spec §1.4 ──
   tokens = [
@@ -189,6 +200,37 @@ let
   skewOf =
     rev: f:
     builtins.filter (c: c.remote && (rev == null || c.ref != rev || definesEvaluators f)) (callsOf f);
+
+  # ── NOT-OWED: the declared obligation `evaluators = "not-owed"` holds the tree to ──
+  # Any `uses:` of a file named `evaluators.yml`, at ANY ref: `callOf` admits only a 40-hex sha,
+  # which fails closed under `owed` (a `@main` call is not a call, so it is refused) and would fail
+  # OPEN here (a `@main` call beside the declaration would read as no call).
+  mentionsEvaluators =
+    l:
+    builtins.match "-?[[:space:]]*uses:[[:space:]]*['\"]?([^'\"[:space:]#]*/)?\\.github/workflows/evaluators\\.yml(@[^'\"[:space:]#]*)?['\"]?([[:space:]]+#.*)?" (
+      trimLine l
+    ) != null;
+  # The not-owed state of a facts record, one of `notOwedStates`. ★ A DECLARED ERROR PLANE IS
+  # REFUSED: the plane exists to be run per evaluator, so a declarer opting out of the evaluators is
+  # the fail-open shape the header warns about, and no workflow text can discharge it.
+  notOwedStates = [
+    "holds"
+    "no-workflow"
+    "calls-evaluators"
+    "declares-error-plane"
+  ];
+  notOwedState =
+    f:
+    if f.declares then
+      "declares-error-plane"
+    else if !f.hasWfDir || f.wfFiles == [ ] then
+      "no-workflow"
+    else if
+      builtins.any (w: builtins.any mentionsEvaluators (lib.splitString "\n" w.text)) f.wfFiles
+    then
+      "calls-evaluators"
+    else
+      "holds";
 
   # ── READER: the only half that touches the filesystem ──
   # facts = { name, hasWfDir, wfFiles = [ { file, text } ], declares, planeFile }. Files are kept
@@ -308,6 +350,7 @@ let
   live = classify liveFacts;
   liveSkew = skewOf harnessRev liveFacts;
   liveCells = leafCount testsError;
+  liveNotOwed = notOwedState liveFacts;
 
   # ── ARMING: synthetic facts records, built here, disjoint from every live reading ──
   # Each row reads its own seed and nothing live. Editing a seed reds the gate.
@@ -394,6 +437,16 @@ let
       declares = false;
     };
   };
+  # A `@main` caller: no 40-hex sha, so not a `callOf` call, and still a call beside `not-owed`.
+  seedCallerAtBranch = {
+    name = "seed-caller-at-branch";
+    hasWfDir = true;
+    wfFiles = [ (seedCaller "main") ];
+    declares = false;
+  };
+  armNotOwed = builtins.mapAttrs (_: notOwedState) (
+    seeds // { caller-at-branch = seedCallerAtBranch; }
+  );
   arm = builtins.mapAttrs (_: classify) seeds;
   armSkew = builtins.mapAttrs (_: skewOf armRev) seeds;
   armStates = lib.unique (map (r: r.state) (builtins.attrValues arm));
@@ -433,7 +486,9 @@ let
     # `.github/workflows` satisfies the whole directory — §2.5's hub keeps a non-caller sibling,
     # `docs-pages.yml`, beside its caller `ci.yml`, and both are green. The name is kept: this is a
     # shipped gate key, and renaming it is a separate change from what it means.
-    every-workflow-calls-evaluators = !refusesNonCaller liveFacts;
+    every-workflow-calls-evaluators = evaluators == "not-owed" || !refusesNonCaller liveFacts;
+    # Under `evaluators = "not-owed"` the obligation above has no subject and this one replaces it.
+    evaluators-not-owed-holds = evaluators == "owed" || liveNotOwed == "holds";
     # The seed's step is its fifth line; the witness coordinate is armed with the state.
     arming-runs = arm.runs.state == "runs" && arm.runs.witness.runs.line == 5;
     arming-unrun = arm.unrun.state == "declares-unrun";
@@ -475,7 +530,19 @@ let
       && !refusesNonCaller seeds.caller
       && !refusesNonCaller seeds.caller-noplane
       && !refusesNonCaller seeds.nowf-noplane;
-    arming-covers-states = lib.sort lib.lessThan armStates == lib.sort lib.lessThan states;
+    # The not-owed states. HOLDS: a `run:`-only workflow and no plane. REFUSED: a call (a pinned
+    # caller, and a `@main` caller `callOf` does not see), no workflow directory, a declared plane.
+    arming-not-owed-holds = armNotOwed.noplane == "holds";
+    arming-not-owed-calls-evaluators =
+      armNotOwed.caller-noplane == "calls-evaluators"
+      && armNotOwed.caller-at-branch == "calls-evaluators";
+    arming-not-owed-no-workflow = armNotOwed.nowf-noplane == "no-workflow";
+    arming-not-owed-declares-error-plane = armNotOwed.runs == "declares-error-plane";
+    arming-covers-states =
+      lib.sort lib.lessThan armStates == lib.sort lib.lessThan states
+      &&
+        lib.sort lib.lessThan (lib.unique (builtins.attrValues armNotOwed))
+        == lib.sort lib.lessThan notOwedStates;
   };
   gateKeys = builtins.attrNames gate;
   failed = builtins.filter (k: gate.${k} != true) gateKeys;
@@ -485,6 +552,13 @@ let
     plane-non-vacuous = "an error plane is declared (testsError holds a non-empty suite) or ci/tests-error.nix exists, and the evaluated testsError holds 0 test-prefixed leaves: nix-unit would report 0/0 and exit 0, the false pass, and a plane file declaring nothing is wired nowhere. Give the plane a cell, or retire the suite and the file.";
     reader-live = "the reader cannot see ci/flake.nix under its root: the check is bound to the wrong tree. `root` must be inputs.self.sourceInfo.outPath.";
     every-workflow-calls-evaluators = "this repository has .github/workflows and no job calls gen-harness's evaluators.yml, so its CI does not run under upstream Nix, Determinate and Lix. Replace the `run:` job with `jobs.ci.uses: sini/gen-harness/.github/workflows/evaluators.yml@<the gen-harness rev in ci/flake.lock>` (write any 40-hex sha, then `relock` rewrites it), or remove the workflow directory.";
+    evaluators-not-owed-holds =
+      {
+        no-workflow = "this repository declares gen.ci.evaluators = \"not-owed\" and has no workflow under .github/workflows: the declaration says its CI runs outside evaluators.yml, and there is no CI. Add the workflow, or drop the declaration.";
+        calls-evaluators = "this repository declares gen.ci.evaluators = \"not-owed\" and a workflow calls evaluators.yml: the declaration and the tree contradict each other. Remove the call, or drop the declaration.";
+        declares-error-plane = "this repository declares gen.ci.evaluators = \"not-owed\" and declares an error plane (flake.testsError holds cells): the error plane exists to run under every evaluator, so opting a declarer out of evaluators.yml is the fail-open shape this check closes. Drop the declaration, or retire the plane.";
+      }
+      .${liveNotOwed} or "";
     caller-ref-is-locked-harness = "a `uses: sini/gen-harness/.github/workflows/evaluators.yml@<sha>` line names a revision other than the gen-harness this ci is locked to (${toString harnessRev}), or this tree defines evaluators.yml itself and calls a published copy. Run `relock`, which rewrites the sha to the locked rev; gen-harness calls its own workflow locally (`uses: ./.github/workflows/evaluators.yml`).";
   };
   armingRepair = "an arming cell stopped firing: the classifier or the leaf counter no longer discriminates the state its seed encodes. A guard that can no longer refuse is not a passing guard; repair the predicate, never the seed.";
@@ -498,7 +572,9 @@ let
       ;
     row = live;
     cells = liveCells;
-    inherit harnessRev;
+    inherit harnessRev evaluators;
+    notOwed = liveNotOwed;
+    armingNotOwed = armNotOwed;
     skew = liveSkew;
     arming = builtins.mapAttrs (_: r: r.state) arm;
     armingCells = {
@@ -521,6 +597,7 @@ pkgs.runCommand "${name}-ci-plane-coverage"
         callOf
         skewOf
         leafCount
+        notOwedState
         gate
         gateKeys
         ;
