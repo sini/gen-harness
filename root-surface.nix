@@ -39,10 +39,12 @@
 # gen-bind, host, k = 16 / 20 / 22 => 1.4 / 3.2 / 8.6 s. No live consumer has that shape (every
 # live walk <= 5.5 s upstream).
 #
-# ★ TOMBSTONES ARE TOP-LEVEL NAMES, DECLARED WITH THEIR EXACT MESSAGE. `retired.<name> = <msg>`
-# excludes the name from the walk and refuses the declaration if the name is absent or no longer
-# throws. That a tombstone throws EXACTLY its message cannot be read here — Nix exposes no thrown
-# message to evaluation — so `retiredCells` below generates one error-plane cell per entry, and the
+# ★ TOMBSTONES ARE PUBLISHED NAMES, DECLARED BY PATH WITH THEIR EXACT MESSAGE (den-hoag-o6b81).
+# `retired.<name-path> = <msg>` keys the path as `foreign` below keys it, so a top-level name is its
+# own key and a nested one is `"show.cell"`. It excludes the path from the walk and refuses the
+# declaration if nothing throws there: the path is absent, under a leaf, or forces cleanly. That a
+# tombstone throws EXACTLY its message cannot be read here — Nix exposes no thrown message to
+# evaluation — so `retiredCells` below generates one error-plane cell per entry, and the
 # error plane pins the message. Those cells declare the plane (`error-plane-declared.nix`), so
 # `checks.tests-error` runs them in every column with no plane file (den-hoag-o7kjc).
 # ★ THE GUARANTEE IS SPLIT ACROSS TWO POINTS (den-hoag-o7kjc). `check` holds "the name throws" at
@@ -52,7 +54,6 @@
 # consumer receives exactly `m`" only because a tombstone's message is a CLOSED LITERAL in the root's
 # own tree, the same text at either point; a message interpolating, or a value reachable through, a
 # dependency value is outside that premise, and neither half would see the difference.
-# A nested tombstone is not expressible; the walk reds on it and names its path.
 #
 # ★ FOREIGN ROOTS ARE DECLARED (den-hoag-ydm94 R9 (a)). A namespace re-exported from another eval
 # (ADR-0014: re-handing, not constructing) is not this library's published surface: the re-export
@@ -77,6 +78,45 @@ let
       f = import root;
     in
     if builtins.isFunction f then f { } else f;
+
+  ns = v: builtins.isAttrs v && !(v ? _type) && (v.type or null) != "derivation";
+  # nixpkgs `lib.strings.escapeNixIdentifier`, the segment rendering of `showAttrPath`.
+  seg =
+    n:
+    if builtins.match "[a-zA-Z_][a-zA-Z0-9_'-]*" n != null then
+      n
+    else
+      builtins.replaceStrings [ "$" ] [ "\\$" ] (builtins.toJSON n);
+  render = p: n: if p == "" then seg n else "${p}.${seg n}";
+
+  # The value at a rendered path, descending only plain namespaces the walk would descend, and
+  # forcing nothing but them. `seg` is prefix-free, so at most one name renders as the path or as a
+  # prefix of it ending at a segment boundary. `{ found = false; }` when no name is there.
+  lookup =
+    p: v: k:
+    let
+      hits = builtins.filter (
+        n:
+        let
+          q = render p n;
+        in
+        q == k || builtins.substring 0 (builtins.stringLength q + 1) k == "${q}."
+      ) (builtins.attrNames v);
+      n = builtins.head hits;
+      q = render p n;
+      t = builtins.tryEval v.${n};
+    in
+    if hits == [ ] then
+      { found = false; }
+    else if q == k then
+      {
+        found = true;
+        value = v.${n};
+      }
+    else if t.success && ns t.value then
+      lookup q t.value k
+    else
+      { found = false; };
 in
 {
   inherit point;
@@ -100,15 +140,13 @@ in
       owed =
         let
           s = point root;
-          stale = builtins.filter (n: !(s ? ${n}) || (builtins.tryEval s.${n}).success) retiredNames;
-          ns = v: builtins.isAttrs v && !(v ? _type) && (v.type or null) != "derivation";
-          # nixpkgs `lib.strings.escapeNixIdentifier`, the segment rendering of `showAttrPath`.
-          seg =
-            n:
-            if builtins.match "[a-zA-Z_][a-zA-Z0-9_'-]*" n != null then
-              n
-            else
-              builtins.replaceStrings [ "$" ] [ "\\$" ] (builtins.toJSON n);
+          stale = builtins.filter (
+            k:
+            let
+              l = lookup "" s k;
+            in
+            !l.found || (builtins.tryEval l.value).success
+          ) retiredNames;
           # Returns the declared foreign roots it stopped at.
           walk =
             p: v:
@@ -116,20 +154,23 @@ in
               acc: n:
               let
                 x = v.${n};
-                q = if p == "" then seg n else "${p}.${seg n}";
+                q = render p n;
               in
-              builtins.addErrorContext "root-surface: while forcing the published name lib.${q}" (
-                builtins.seq x (
-                  if !(ns x) then
-                    acc
-                  else if foreign ? ${q} then
-                    acc ++ [ q ]
-                  else
-                    acc ++ walk q x
+              if retired ? ${q} then
+                acc
+              else
+                builtins.addErrorContext "root-surface: while forcing the published name lib.${q}" (
+                  builtins.seq x (
+                    if !(ns x) then
+                      acc
+                    else if foreign ? ${q} then
+                      acc ++ [ q ]
+                    else
+                      acc ++ walk q x
+                  )
                 )
-              )
             ) [ ] (builtins.attrNames v);
-          stopped = walk "" (builtins.removeAttrs s retiredNames);
+          stopped = walk "" s;
           unreached = builtins.filter (k: !(builtins.elem k stopped)) (builtins.attrNames foreign);
         in
         if stale != [ ] then
@@ -191,7 +232,14 @@ in
     lib.mapAttrs' (
       n: m:
       lib.nameValuePair "test-retired-${n}" {
-        expr = closed.${n};
+        expr =
+          let
+            l = lookup "" closed n;
+          in
+          if l.found then
+            l.value
+          else
+            throw "root-surface: declared retired but absent at the root seam: ${n}";
         expectedError = {
           type = "ThrownError";
           msg = "^" + lib.escapeRegex m + "$";

@@ -193,9 +193,11 @@ in
     type = lib.types.attrsOf lib.types.str;
     default = { };
     description = ''
-      Top-level tombstones: `<name> = <the EXACT message its throw carries>`. Each name is excluded
-      from the walk, refused if absent or no longer throwing, and pinned to its message by one
-      generated `flake.testsError.root-surface-retired.test-retired-<name>` cell forced at the root
+      Tombstones: `<name-path> = <the EXACT message its throw carries>`, the path keyed as `foreign`
+      keys it, so a top-level name is its own key and a nested one is `"show.cell"`. Each path is
+      excluded from the walk, refused if nothing throws there (absent, under a leaf, or forcing
+      cleanly), and pinned to its message by one generated
+      `flake.testsError.root-surface-retired.test-retired-<name-path>` cell forced at the root
       seam, with its dependencies from `./ci`'s inputs. That cell declares the error plane, so
       `checks.tests-error` runs it in every column.
     '';

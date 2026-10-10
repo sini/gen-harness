@@ -56,6 +56,28 @@ in
       expected = "fx-root-surface";
     };
 
+    test-a-declared-nested-tombstone-is-excluded = {
+      expr = check {
+        root = fx + "/nested-tomb";
+        retired."show.cell" = "root-surface-fixture: `show.cell` is renamed `show.node`.";
+      };
+      expected = "fx-root-surface";
+    };
+
+    # LIVE CONTROL for the cell above: the same root undeclared refuses, because the walk forces
+    # `show.cell`. Without it the cell above is satisfied by a walk that descends nowhere.
+    test-control-an-undeclared-nested-tombstone-is-walked = {
+      expr =
+        (builtins.tryEval (
+          inputs.gen-harness.lib.checks.rootSurface {
+            inherit pkgs;
+            name = "fx";
+            root = fx + "/nested-tomb";
+          }
+        )).success;
+      expected = false;
+    };
+
     test-a-declared-foreign-root-stops-the-walk = {
       expr = check {
         root = fx + "/foreign-root";
@@ -84,6 +106,16 @@ in
       expr = check {
         root = fx + "/dotted-name";
         foreign."\"engine.lib\"" = "a fixture own name";
+      };
+      expected = "fx-root-surface";
+    };
+
+    # A retired path through the own name `"engine.lib"` is declared by its quoted key; its pair on
+    # the error plane declares the unquoted nested path and finds nothing there.
+    test-a-quoted-key-retires-under-the-own-dotted-name = {
+      expr = check {
+        root = fx + "/dotted-name";
+        retired."\"engine.lib\".y" = "root-surface-fixture: an own name containing a dot";
       };
       expected = "fx-root-surface";
     };

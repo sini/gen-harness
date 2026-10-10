@@ -66,9 +66,10 @@ citation region is read from it.
 the root is applied at its own declared point (`import <root> { }`, or the root itself when it is a
 set) and every published name, a path through plain namespaces with `_type`-tagged values,
 derivations and functions as leaves, must evaluate. A repository with no root entry declares
-`{ gen.ci.rootSurface.entry = "not-owed"; }`. A top-level tombstone is declared with its exact
-message, `gen.ci.rootSurface.retired.<name> = "<message>";`, which also generates the error-plane
-cell `testsError.root-surface-retired.test-retired-<name>` pinning that message, with the root's
+`{ gen.ci.rootSurface.entry = "not-owed"; }`. A tombstone is declared by its name-path with its exact
+message, `gen.ci.rootSurface.retired."<name-path>" = "<message>";`, the path keyed as `foreign`
+keys it (a top-level name is its own key, a nested one is `"show.cell"`), which also generates the
+error-plane cell `testsError.root-surface-retired.test-retired-<name-path>` pinning that message, with the root's
 dependencies taken from `./ci`'s inputs through its `src` seam so the cell never fetches. That cell
 declares the repository's error plane, so `checks.tests-error` runs it with no plane file. A
 re-exported foreign namespace is not the library's published surface: it is declared with its

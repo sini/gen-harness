@@ -58,6 +58,7 @@ let
     };
   };
   gone = "root-surface-fixture: `gone` is retired (use `live`).";
+  nestedGone = "root-surface-fixture: `show.cell` is renamed `show.node`.";
 
   # Every printable ASCII character, in code-point order — gen-prelude's `printableAscii`, the
   # whole single-character domain an escape set draws from, so a member ADDED to the copy is
@@ -100,6 +101,36 @@ in
           live = "x";
         };
       } "root-surface: declared retired but absent or no longer throwing: live";
+      test-an-undeclared-nested-tombstone-reds-with-its-own-message = refuses {
+        root = fx + "/nested-tomb";
+      } "root-surface-fixture: `show.cell` is renamed `show.node`.";
+      test-a-nested-retired-path-that-is-absent-is-refused = refuses {
+        root = fx + "/nested-tomb";
+        retired = {
+          "show.cell" = nestedGone;
+          "show.gone" = "x";
+        };
+      } "root-surface: declared retired but absent or no longer throwing: show.gone";
+      test-a-nested-retired-path-that-no-longer-throws-is-refused = refuses {
+        root = fx + "/nested-tomb";
+        retired = {
+          "show.cell" = nestedGone;
+          "show.node" = "x";
+        };
+      } "root-surface: declared retired but absent or no longer throwing: show.node";
+      test-a-retired-path-under-a-leaf-is-refused = refuses {
+        root = fx + "/nested-tomb";
+        retired = {
+          "show.cell" = nestedGone;
+          "live.cell" = "x";
+        };
+      } "root-surface: declared retired but absent or no longer throwing: live.cell";
+      # The nested path `engine.lib.y` is absent; the own name `"engine.lib"`'s `y`, which renders
+      # the same unquoted, is not found under it.
+      test-a-nested-retired-path-is-not-an-own-dotted-name = refuses {
+        root = fx + "/dotted-name";
+        retired."engine.lib.y" = "x";
+      } "root-surface: declared retired but absent or no longer throwing: engine.lib.y";
       test-owed-without-a-root-entry-is-a-named-refusal = refuses {
         root = fx;
       } "root-surface: owed (the default) but the root has no default.nix";
@@ -175,6 +206,30 @@ in
       root = fx + "/tomb";
       retired = { inherit gone; };
       inputs = { };
+    };
+    flake.testsError.root-surface-retired-nested-fixture = (import ../root-surface.nix).retiredCells {
+      inherit lib;
+      root = fx + "/nested-tomb";
+      retired."show.cell" = nestedGone;
+      inputs = { };
+    };
+    # The cell's own refusal: a declared path the closed root does not publish is refused by name,
+    # not read as a missing attribute. `check` refuses such a declaration first at a root whose
+    # point and seam agree, so the cell is reached here directly.
+    flake.testsError.root-surface-retired-seam-absent = {
+      test-a-path-absent-at-the-root-seam-is-refused = {
+        expr =
+          ((import ../root-surface.nix).retiredCells {
+            inherit lib;
+            root = fx + "/nested-tomb";
+            retired."show.gone" = nestedGone;
+            inputs = { };
+          })."test-retired-show.gone".expr;
+        expectedError = {
+          type = "ThrownError";
+          msg = lib.escapeRegex "root-surface: declared retired but absent at the root seam: show.gone";
+        };
+      };
     };
     flake.testsError.root-surface-retired-shim = (import ../root-surface.nix).retiredCells {
       inherit lib;
