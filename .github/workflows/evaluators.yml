@@ -131,6 +131,13 @@ jobs:
             lazy-trees = true
             ${{ env.EVAL_CONF }}
 
+      # ★ THE STANDALONE DAEMON, NOT THE SOCKET. Lix 2.96's per-connection daemon (`nix-daemon@.service`,
+      # `--for-socket-activation`) takes its protocol from LISTEN_FDNAMES, and the installer starts
+      # `nix-daemon.socket` (Accept=yes). This runner's systemd 255 names an accepted connection
+      # `connection`, not the socket's `FileDescriptorName=legacy-combined`, so every instance exits
+      # `unsupported daemon protocol connection` and the client reads a connection reset (measured on
+      # the runner, both arms one run). `nix-daemon.service` runs the same binary listening itself, and
+      # its `Conflicts=` stops the socket. The installer's self-test runs before the switch and still WARNs.
       - name: install Lix ${{ env.LIX_VERSION }}
         if: matrix.evaluator == 'lix'
         env:
@@ -147,6 +154,7 @@ jobs:
             --extra-conf "access-tokens = github.com=$TOKEN" \
             --extra-conf "trusted-users = root $USER" \
             --extra-conf "$EVAL_CONF"
+          sudo systemctl start nix-daemon.service
           echo /nix/var/nix/profiles/default/bin >> "$GITHUB_PATH"
 
       # No cache step in any column (den-hoag-uer2v). magic-nix-cache's Post step re-uploads what the
