@@ -30,9 +30,9 @@
     # The error plane's three ENGINES (`error-plane-engines.nix`), each at the release `evaluators.yml`
     # pins for its column and with no `follows`, so the out path is the one the column installs.
     # `ci/tests/engine-pins.nix` holds each equal to its pin.
-    nix-upstream.url = "github:NixOS/nix/2.35.2";
+    nix-upstream.url = "github:NixOS/nix/2.35.3";
     nix-determinate.url = "github:DeterminateSystems/nix-src/v3.23.1";
-    nix-lix.url = "https://git.lix.systems/lix-project/lix/archive/2.95.3.tar.gz";
+    nix-lix.url = "https://git.lix.systems/lix-project/lix/archive/2.96.0.tar.gz";
   };
 
   outputs = inputs: {
