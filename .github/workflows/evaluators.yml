@@ -72,7 +72,7 @@ on:
 # `ci/tests/engine-pins.nix` reds gen-harness when a pin and its input part — a bump moves both.
 env:
   NIX_VERSION: "2.35.3" # latest: https://nixos.org/nix/install -> releases.nixos.org/nix/nix-<v>/install
-  DETERMINATE_VERSION: "3.23.1" # latest: github.com/DeterminateSystems/nix-installer/releases/latest
+  DETERMINATE_VERSION: "3.23.2" # latest: github.com/DeterminateSystems/nix-installer/releases/latest
   LIX_VERSION: "2.96.0" # latest: https://releases.lix.systems/manifest.nix
   LIX_TARBALL_SHA256: "209d955d6abeeeb0e858687b6cafe9a869186ca1de205a5e1c30f70bb2030d82"
   # The installer is not the evaluator: lix-installer 3.95.0, from an immutable versioned path, told

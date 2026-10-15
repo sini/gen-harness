@@ -9,7 +9,8 @@
 # Arms, each read by exit status AND text:
 #   `runtimeInputs = [ ]`          -> 0
 #   `runtimeInputs = [ pkgs.nix ]` -> 1, REFUSED naming a `nix-2.x` path
-#   `runtimeInputs = [ pkgs.lix ]` -> 1, REFUSED naming a `lix-2.x` path
+#   `runtimeInputs = [ <lix> ]`    -> 1, REFUSED naming a `lix-2.x` path; <lix> is the Lix
+#                                     package set of the release the lix column pins
 #   `nix-store` rc 1               -> 2, CONTROL FAILED (never a count of zero)
 #   `nix-store` rc 0, no output    -> 2, CONTROL FAILED (Determinate's answer on an unrealised path)
 { inputs, ... }:
@@ -40,7 +41,7 @@
           {
             empty = fixture "empty" [ ];
             withNix = fixture "nix" [ pkgs.nix ];
-            withLix = fixture "lix" [ pkgs.lix ];
+            withLix = fixture "lix" [ pkgs.lixPackageSets.lix_2_96.lix ];
           }
           ''
             mkdir bin
