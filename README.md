@@ -104,13 +104,13 @@ published copy of the member is excluded by name instead, citing the row that tr
 
 ```nix
 gen.ci.examplesExcluded.demo = {
-  row = "den-hoag-tyu25";
+  row = "issue-42";
   reason = "its flake takes the hub, which pins this repository";
 };
 ```
 
 The totality cell counts it, the force and leaves cells skip it, and it gets one cell of its own,
-`test-demo-excluded-citing-den-hoag-tyu25`, so every run lists it with its row. That cell reds on a
+`test-demo-excluded-citing-issue-42`, so every run lists it with its row. That cell reds on a
 blank `row` or `reason`, on a directory that is not on disk, and on a name also declared in
 `gen.ci.examples`.
 
