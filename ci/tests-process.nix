@@ -26,10 +26,11 @@
       # DERIVED and synthetic: a fixture identity that cannot be a real repository, so no arm can
       # invert in some member the way `ci-self-input.nix`'s hardcoded `clean-siblings` did.
       fixtureName = "gen-harness-relock-fixture";
-    in
-    {
-      apps.tests-process.meta.description = "the relock behaviour arms, under the nix on PATH, in a network namespace of their own";
-      apps.tests-process.program = import ../relock-behaviour.nix {
+      serialEvalCells = import ./serial-eval-cells.nix {
+        inherit pkgs;
+        serialEval = inputs.gen-harness.lib.serialEval { inherit pkgs; };
+      };
+      relockArms = import ../relock-behaviour.nix {
         inherit pkgs fixtureName;
         name = "gen-harness";
         relock = inputs.gen-harness.lib.relock {
@@ -45,5 +46,15 @@
             ;
         };
       };
+    in
+    {
+      apps.tests-process.meta.description = "the relock behaviour arms, under the nix on PATH, in a network namespace of their own";
+      # The `lib.serialEval` cells run first, OUTSIDE the relock arms' namespace and under the
+      # column's own configuration, which those arms replace with this repository's.
+      apps.tests-process.program = pkgs.writeShellScriptBin "tests-process" ''
+        set -euo pipefail
+        ${serialEvalCells}/bin/serial-eval-cells
+        exec ${relockArms}/bin/tests-process
+      '';
     };
 }

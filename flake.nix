@@ -110,6 +110,12 @@
     # only name what is published. `{ pkgs, name }` -> the command derivation.
     lib.processPlane = import ./process-plane.nix;
 
+    # The counted runs' serial options (`serial-eval.bash`), for every runner that reads
+    # `NIX_SHOW_STATS` counters: a thunk count is defined only for a serial evaluation. The same
+    # form as `lib.processPlane`, a store path over a sourced script with no evaluator in it.
+    # `{ pkgs }` -> the library; the devshell exports it as `GEN_SERIAL_EVAL` for bare scripts.
+    lib.serialEval = import ./serial-eval.nix;
+
     # ★ THE BATCH ASSERTER'S FAILURE MESSAGE, PUBLISHED BECAUSE IT IS OTHERWISE UNREACHABLE EXCEPT
     # BY FAILING. `flakeModule.nix` calls it on one arm — the arm where a cell has already failed
     # — so the only value it was ever read at was a value that had already taken `checks.default`

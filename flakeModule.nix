@@ -652,6 +652,12 @@ in
               name = "FLAKE_ROOT";
               eval = "$PRJ_ROOT";
             }
+            # `lib.serialEval`, for a counted script run outside a flake app (a bench): it sources
+            # this path and refuses without it, so it never reads its counters unpinned.
+            {
+              name = "GEN_SERIAL_EVAL";
+              value = "${import ./serial-eval.nix { inherit pkgs; }}";
+            }
           ];
 
           commands = [

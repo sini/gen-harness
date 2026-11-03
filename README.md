@@ -276,6 +276,14 @@ runs once.
 A green column does not cover a check that evaluates inside its build sandbox through `pkgs.nix`:
 that evaluation is the same in all three columns.
 
+A column's `eval-cores` stays as its installer wrote it, so Determinate's correctness cells run under
+its parallel evaluator. A thunk count is defined only for a serial run, so every evaluation whose
+`NIX_SHOW_STATS` counters are read carries `lib.serialEval`'s options as argv: `{ pkgs }` gives a
+bash library whose `serialEvalOptions <nix-instantiate path>` sets the array `SERIAL_EVAL`, once per
+runner, to `--option eval-cores 1` where the evaluator has that setting and to nothing where it does
+not, exiting 2 when it cannot tell. The devshell exports the library as `GEN_SERIAL_EVAL` for scripts
+run outside a flake app.
+
 The sha is the harness the caller's `ci/flake.lock` holds, never `@main`: the workflow calls
 devshell commands from the locked harness, and a mismatch would put two versions of the harness in
 one run. `relock` rewrites the sha on every run it does not refuse, and `checks.ci-plane-coverage`

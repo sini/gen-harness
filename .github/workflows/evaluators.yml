@@ -89,7 +89,8 @@ env:
   # Installer lines left alone, because they change no evaluation output: max-jobs, cores,
   # always-allow-substitutes, auto-optimise-store, bash-prompt-prefix, substituters and keys,
   # trusted-users, netrc-file. Determinate's lazy-trees is stated at its install step, and its
-  # eval-cores is printed, not normalised.
+  # eval-cores is printed, not normalised: the counted runs pin it themselves, per evaluation, through
+  # `lib.serialEval`, because a thunk count is defined only for a serial run.
   EVAL_CONF: |
     show-trace = false
     nix-path =
