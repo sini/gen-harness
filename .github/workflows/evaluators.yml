@@ -277,11 +277,11 @@ jobs:
           grep -Fxq "evaluator: $(nix-instantiate --version | sed -n 1p)" "$RUNNER_TEMP/tests-process.log"
 
       - name: error plane, by type (nix-unit, on the ci-locked upstream nix-expr)
-        if: matrix.evaluator == 'nix' && steps.identity.outputs.error_plane == 'declared'
+        if: ${{ !cancelled() && matrix.evaluator == 'nix' && steps.identity.outputs.error_plane == 'declared' }}
         run: nix develop ./ci --command nix-unit --flake ./ci#testsError
 
       - name: extra
-        if: inputs.extra-run != ''
+        if: ${{ !cancelled() && inputs.extra-run != '' }}
         env:
           EXTRA_RUN: ${{ inputs.extra-run }}
         run: bash -eo pipefail -c "$EXTRA_RUN"
