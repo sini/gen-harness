@@ -87,13 +87,23 @@ env:
   #   nix-path   — the Determinate and Lix installers write `extra-nix-path` (two different
   #     nixpkgs); the `nix` column has none, so a `<nixpkgs>` lookup would resolve in two columns only.
   # Installer lines left alone, because they change no evaluation output: max-jobs, cores,
-  # always-allow-substitutes, auto-optimise-store, bash-prompt-prefix, substituters and keys,
+  # always-allow-substitutes, auto-optimise-store, bash-prompt-prefix,
   # trusted-users, netrc-file. Determinate's lazy-trees is stated at its install step, and its
   # eval-cores is printed, not normalised: the counted runs pin it themselves, per evaluation, through
   # `lib.serialEval`, because a thunk count is defined only for a serial run.
   EVAL_CONF: |
     show-trace = false
     nix-path =
+
+  # Official release caches for the pinned engines, configured in the installer/daemon before
+  # checks. The extra-* forms retain installer defaults; this is separate from EVAL_CONF because
+  # it changes acquisition, not evaluation. Published keys:
+  # https://github.com/NixOS/nix/blob/2.35.4/src/libstore/include/nix/store/globals.hh
+  # https://github.com/DeterminateSystems/nix-installer/blob/v3.24.1/src/action/common/place_nix_configuration.rs
+  # https://git.lix.systems/lix-project/lix-installer/src/branch/main/src/action/common/place_nix_configuration.rs
+  RELEASE_CACHE_CONF: |
+    extra-substituters = https://cache.nixos.org https://install.determinate.systems https://cache.lix.systems
+    extra-trusted-public-keys = cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= cache.flakehub.com-3:hJuILl5sVK4iKm86JzgdXW12Y2Hwd5G07qKtHTOcDCM= cache.flakehub.com-4:Asi8qIv291s0aYLyH6IOnr5Kf6+OF14WVjkE6t3xMio= cache.lix.systems:aBnZUw8zA7H35Cz2RyKFVs3H4PlGTLawyY5KRbvJR8o=
 
 jobs:
   evaluate:
@@ -119,7 +129,9 @@ jobs:
           github_access_token: ${{ github.token }}
           # Appended after the installer's own `show-trace = true`; the later line wins, and
           # `evaluator identity` reads the value back rather than trusting that.
-          extra_nix_config: ${{ env.EVAL_CONF }}
+          extra_nix_config: |
+            ${{ env.EVAL_CONF }}
+            ${{ env.RELEASE_CACHE_CONF }}
 
       - name: install Determinate Nix ${{ env.DETERMINATE_VERSION }}
         if: matrix.evaluator == 'determinate'
@@ -131,6 +143,7 @@ jobs:
           extra-conf: |
             lazy-trees = true
             ${{ env.EVAL_CONF }}
+            ${{ env.RELEASE_CACHE_CONF }}
 
       # ★ THE STANDALONE DAEMON, NOT THE SOCKET. Lix 2.96's per-connection daemon (`nix-daemon@.service`,
       # `--for-socket-activation`) takes its protocol from LISTEN_FDNAMES, and the installer starts
@@ -154,7 +167,8 @@ jobs:
             --nix-package-url "file://$RUNNER_TEMP/lix.tar.xz" \
             --extra-conf "access-tokens = github.com=$TOKEN" \
             --extra-conf "trusted-users = root $USER" \
-            --extra-conf "$EVAL_CONF"
+            --extra-conf "$EVAL_CONF" \
+            --extra-conf "$RELEASE_CACHE_CONF"
           sudo systemctl start nix-daemon.service
           echo /nix/var/nix/profiles/default/bin >> "$GITHUB_PATH"
 
@@ -164,6 +178,25 @@ jobs:
       # column first (OQ1 arm (b)), then nix and lix, priced live against a fresh-rev control: both
       # columns' mean job fell in both priced repositories, and what the cache had substituted
       # (chiefly nix-unit 2.35.1, compiled in the devShell) costs about what its Run step did.
+
+      - name: release cache configuration
+        run: |
+          [ -n "$RELEASE_CACHE_CONF" ] || { echo "::error::release cache configuration is unavailable"; exit 1; }
+          rc=0
+          while IFS= read -r l; do
+            [ -n "$l" ] || continue
+            k=${l%%=*}; k=${k% }; k=${k#extra-}
+            got=$(nix config show "$k")
+            echo "$k = $got"
+            read -ra required <<< "${l#*=}"
+            for member in "${required[@]}"; do
+              case " $got " in
+                *" $member "*) ;;
+                *) echo "::error::the ${{ matrix.evaluator }} column is missing '$member' from '$k'"; rc=1 ;;
+              esac
+            done
+          done <<< "$RELEASE_CACHE_CONF"
+          exit "$rc"
 
       - name: evaluator identity
         id: identity
