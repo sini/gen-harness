@@ -289,6 +289,8 @@ also available to non-`mkCi` callers through `gen-harness.lib.checks.evaluators 
 with the harness's own evaluator inputs bound by that published builder. The aggregate has exactly
 `nix`, `determinate` and `lix` directories, each with `bin/nix` and `nix.conf`, constructed from the
 same engine binding and workflow configuration as the error plane. It adds no commands to PATH.
+The module publishes it under `legacyPackages.<system>.evaluators`, so the reusable workflow's
+ordinary `nix flake check` does not force it; explicit `ci#evaluators` still resolves to the aggregate.
 The devshell's `GEN_EVALUATORS` is the caller-local installable, not a built package, so ordinary
 shell entry and one-column CI do not build the other engines.
 

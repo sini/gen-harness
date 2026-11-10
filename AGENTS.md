@@ -94,7 +94,7 @@ functions of `pkgs`, no flake-parts module, no gen input. `lib.checks.errorPlane
 
 ## Entry points by task
 
-`mkCi` also exposes `packages.<system>.evaluators`, including for a consumer with no error plane.
+`mkCi` also exposes `legacyPackages.<system>.evaluators`, including for a consumer with no error plane.
 The devshell exports its caller-local installable as `GEN_EVALUATORS=$FLAKE_ROOT/ci#evaluators`;
 shell entry does not build it. Explicitly build it with a registered out-link in a persistent phase
 directory, retain that root until every measuring process exits, and invoke each absolute

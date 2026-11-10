@@ -466,7 +466,7 @@ in
         # flake-level `testsError`, never this module's own arguments, so it cannot recurse.
         imports = lib.optional planeDeclared { checks.tests-error = errorPlane.tests-error; };
 
-        packages.evaluators = import ./evaluators.nix { inherit pkgs system genInputs; };
+        legacyPackages.evaluators = import ./evaluators.nix { inherit pkgs system genInputs; };
 
         # Pre-commit hooks: format check + unit tests
         pre-commit = {
