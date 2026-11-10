@@ -91,6 +91,8 @@
     lib.checks.errorPlane =
       args: (import ./error-plane-check.nix (args // { genInputs = inputs; })).tests-error;
 
+    lib.checks.evaluators = args: import ./evaluators.nix (args // { genInputs = inputs; });
+
     # ★ THE TWO-ACT LOCK BUMP, PUBLISHED AS A BUILDER RATHER THAN AS A DEVSHELL ENTRY. Every mkCi
     # consumer gets `relock` through `flakeModule.nix`, which is the ordinary route and is
     # unchanged. The hub is the case this exists for: it is legitimately NOT an mkCi consumer — it

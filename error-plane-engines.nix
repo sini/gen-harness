@@ -59,24 +59,34 @@ let
     else
       lib.concatMapStrings (l: lib.removePrefix "    " l + "\n") block;
 
-  engines = {
-    nix = {
-      pin = "NIX_VERSION";
-      pkg = genInputs.nix-upstream.packages.${system}.nix-cli;
-      conf = "experimental-features = nix-command flakes\n";
-    };
-    determinate = {
-      pin = "DETERMINATE_VERSION";
-      pkg = genInputs.nix-determinate.packages.${system}.nix-cli;
-      # Stated at the Determinate install step of `evaluators.yml`, not in EVAL_CONF.
-      conf = "lazy-trees = true\n";
-    };
-    lix = {
-      pin = "LIX_VERSION";
-      pkg = genInputs.nix-lix.packages.${system}.default;
-      conf = "experimental-features = nix-command flakes\n";
-    };
-  };
+  engines =
+    lib.mapAttrs
+      (
+        family: engine:
+        engine
+        // {
+          executable = "${engine.pkg}/bin/nix";
+          configuration = builtins.toFile "${family}-nix.conf" (evalConf + engine.conf);
+        }
+      )
+      {
+        nix = {
+          pin = "NIX_VERSION";
+          pkg = genInputs.nix-upstream.packages.${system}.nix-cli;
+          conf = "experimental-features = nix-command flakes\n";
+        };
+        determinate = {
+          pin = "DETERMINATE_VERSION";
+          pkg = genInputs.nix-determinate.packages.${system}.nix-cli;
+          # Stated at the Determinate install step of `evaluators.yml`, not in EVAL_CONF.
+          conf = "lazy-trees = true\n";
+        };
+        lix = {
+          pin = "LIX_VERSION";
+          pkg = genInputs.nix-lix.packages.${system}.default;
+          conf = "experimental-features = nix-command flakes\n";
+        };
+      };
   family =
     if lib.hasSuffix "-lix" builtins.nixVersion then
       "lix"

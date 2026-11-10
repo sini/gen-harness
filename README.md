@@ -284,6 +284,29 @@ runner, to `--option eval-cores 1` where the evaluator has that setting and to n
 not, exiting 2 when it cannot tell. The devshell exports the library as `GEN_SERIAL_EVAL` for scripts
 run outside a flake app.
 
+For a local three-evaluator phase, explicitly build the caller's `ci#evaluators` package. It is
+also available to non-`mkCi` callers through `gen-harness.lib.checks.evaluators { pkgs; system; }`,
+with the harness's own evaluator inputs bound by that published builder. The aggregate has exactly
+`nix`, `determinate` and `lix` directories, each with `bin/nix` and `nix.conf`, constructed from the
+same engine binding and workflow configuration as the error plane. It adds no commands to PATH.
+The devshell's `GEN_EVALUATORS` is the caller-local installable, not a built package, so ordinary
+shell entry and one-column CI do not build the other engines.
+
+Choose a persistent phase directory and retain its registered out-link until every measuring
+process has exited. Under the host's memory cap and shared heavy-run lock where required:
+
+```sh
+nix build "$GEN_EVALUATORS" --out-link "$phase/evaluators"
+```
+
+Resolve each family's executable through that root, compare its canonical target with the package
+selected by the caller's written ci lock, and record its version before measuring. Invoke the absolute
+path with `NIX_CONFIG` set to the contents of its own `nix.conf`, with `NIX_PATH` unset, and read
+back the effective settings. Determinate's normal contract includes `lazy-trees = true`.
+Keep the root's closure and GC-root relationship with the measurement evidence; a lock file or
+`--no-link` build alone does not retain evaluator outputs. Counter measurements additionally source
+`GEN_SERIAL_EVAL` as described above. Release the out-link only when the phase is finished.
+
 The sha is the harness the caller's `ci/flake.lock` holds, never `@main`: the workflow calls
 devshell commands from the locked harness, and a mismatch would put two versions of the harness in
 one run. `relock` rewrites the sha on every run it does not refuse, and `checks.ci-plane-coverage`
