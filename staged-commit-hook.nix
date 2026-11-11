@@ -12,7 +12,7 @@
 # it only by judging the working tree instead of the commit. So this is a construction: the hooks
 # run in an EXPORT of the tree the commit records, and the shared checkout is only read.
 #
-# `{ pkgs, package, configFile, chained ? [ ] }` -> `{ hook; install; }`:
+# `{ pkgs, package, configFile, chained ? [ ], wholeTree ? null }` -> `{ hook; install; }`:
 #   hook     the hook script, a store derivation. It names `package` and `configFile` by store
 #            path, so its closure holds both and one GC root on it keeps the hook runnable.
 #   install  the slot writer, run at devshell entry (stderr only).
@@ -21,11 +21,24 @@
 #            a non-zero exit refuses the commit. The declared home of a command a consumer used to
 #            prepend to the slot by hand, which the writer below would otherwise erase. Each must
 #            only read the checkout.
+#   wholeTree  the `files` regexes of the hooks that read the WHOLE tree rather than the files they
+#            are handed (`pass_filenames = false`, or `always_run`, which is `""`). A commit whose
+#            staged paths match none of them exports only the staged files. `null` (the default)
+#            exports the whole tree on every commit, as before.
+#
+# ★ WHY THE EXPORT IS SPARSE WHEN IT CAN BE. A full export writes every tracked file. Measured on
+# den-ag-design (721,158 files, 4.2 GB): about 29 s per commit for `checkout-index -a`, against 2.8 s
+# sparse, for a commit touching one file. A files-scoped hook is handed only staged paths, so only
+# those need to exist. The rest are marked `skip-worktree`, which keeps them out of
+# `git diff` / `status`: pre-commit still finds nothing unstaged to stash. A hook that reads beyond
+# the paths it is handed must declare `pass_filenames = false` or `always_run`, which puts it in
+# `wholeTree`.
 {
   pkgs,
   package,
   configFile,
   chained ? [ ],
+  wholeTree ? null,
 }:
 let
   marker = "# gen-harness: staged-tree commit hook";
@@ -61,7 +74,42 @@ let
     printf '%s\n' "$objects" > .git/objects/info/alternates
     if [ -n "$head" ]; then git update-ref HEAD "$head"; fi
     git read-tree "$tree"
-    git checkout-index -a
+    ${
+      if wholeTree == null then
+        ''
+          git checkout-index -a
+        ''
+      else
+        ''
+          # Staged paths that exist in the recorded tree: deletions have no index entry to check out.
+          staged=$(mktemp "''${TMPDIR:-/tmp}/gen-harness-staged-paths.XXXXXX")
+          trap 'rm -rf "$export_dir" "$staged"' EXIT
+          full=0
+          if [ -z "$head" ]; then
+            full=1
+          else
+            git diff --cached --name-only -z --no-renames --diff-filter=d HEAD > "$staged"
+            # Any staged path a whole-tree hook would fire on needs the whole tree. An empty pattern
+            # (`always_run`, or a hook with no `files`) matches every commit. A pattern grep cannot
+            # compile errs toward the full export.
+            for pattern in ${concatMapStrings (p: escapeShellArg p + " ") wholeTree}; do
+              if [ -z "$pattern" ]; then full=1; break; fi
+              rc=0
+              tr '\0' '\n' < "$staged" | ${pkgs.gnugrep}/bin/grep -qE -- "$pattern" || rc=$?
+              if [ "$rc" -ne 1 ]; then full=1; break; fi
+            done
+          fi
+          if [ "$full" -eq 1 ]; then
+            git checkout-index -a
+          else
+            git ls-files -z | git update-index -z --skip-worktree --stdin
+            if [ -s "$staged" ]; then
+              git update-index -z --no-skip-worktree --stdin < "$staged"
+              git checkout-index -z --stdin < "$staged"
+            fi
+          fi
+        ''
+    }
     # In the export the working tree IS the index, so pre-commit's stash finds nothing to stash and
     # its file list is `diff --staged` against HEAD: exactly the commit's content. A fixer's rewrite
     # lands in the export and is discarded, so it refuses ("files were modified by this hook") and

@@ -440,6 +440,13 @@ in
           inherit pkgs;
           inherit (config.pre-commit.settings) package configFile;
           chained = commitHookChained;
+          # The enabled hooks that read the whole tree. A commit none of them fires on exports only
+          # its staged files (staged-commit-hook.nix, "WHY THE EXPORT IS SPARSE").
+          wholeTree = lib.mapAttrsToList (_: h: if h.always_run then "" else h.files) (
+            lib.filterAttrs (
+              _: h: h.enable && (h.always_run || !h.pass_filenames)
+            ) config.pre-commit.settings.hooks
+          );
         };
 
         # The error plane as CHECKS, judged by message by the column's own evaluator
