@@ -13,7 +13,7 @@
   perSystem =
     { pkgs, ... }:
     let
-      cells = 24;
+      cells = 36;
       witness = pkgs.writeShellScript "witness" ''
         sha256sum "$ORACLE_REPO/u.txt" | cut -c1-64 > "$ORACLE_WORK/in-window.sha"
         if [ -s "$ORACLE_WORK/target" ]; then echo late >> "$ORACLE_REPO/$(cat "$ORACLE_WORK/target")"; fi
@@ -31,6 +31,17 @@
         inherit pkgs package;
         configFile = config;
         chained = [ "chain.sh" ];
+        postCommit = [
+          "post-fail.sh"
+          "post.sh"
+        ];
+        prePush = [ "push.sh" ];
+      };
+      # The same construction with nothing declared for the two further slots: its writer removes
+      # the slots the first one wrote.
+      bare = inputs.gen-harness.lib.stagedCommitHook {
+        inherit pkgs package;
+        configFile = config;
       };
       closure = pkgs.closureInfo { rootPaths = [ staged.hook ]; };
     in
@@ -44,6 +55,9 @@
             ];
             HOOK = staged.hook;
             INSTALL = staged.install;
+            POST_HOOK = staged.postCommitHook;
+            PUSH_HOOK = staged.prePushHook;
+            INSTALL_BARE = bare.install;
           }
           ''
             rc=0

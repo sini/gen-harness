@@ -46,6 +46,8 @@ let
   sheetDeclared = config.gen.ci.agentsMd.sheet;
   # Bound HERE for the same reason again, and read by the commit hook below.
   commitHookChained = config.gen.ci.commitHook.chained;
+  commitHookPostCommit = config.gen.ci.commitHook.postCommit;
+  commitHookPrePush = config.gen.ci.commitHook.prePush;
   # Bound HERE for the same reason again, and read by both the check and the generated cells.
   rootSurface = import ./root-surface.nix;
   rsEntry = config.gen.ci.rootSurface.entry;
@@ -164,6 +166,32 @@ in
       must only read the checkout. This is where a command once prepended to
       `.git/hooks/pre-commit` by hand is declared: the hook is written whole at every devshell
       entry (`staged-commit-hook.nix`), so a hand edit does not survive. Declare it in the same
+      commit as the harness bump that brings this option.
+    '';
+  };
+
+  options.gen.ci.commitHook.postCommit = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [ ];
+    example = [ "STATUS/probe-evidence.zsh" ];
+    description = ''
+      Worktree-relative executables run after every commit, in the real checkout, in order, each
+      even when an earlier one failed. git ignores a post-commit hook's exit status, so a failure is
+      reported on stderr and the commit stands. Written whole at every devshell entry
+      (`staged-commit-hook.nix`), like the pre-commit slot; with nothing declared, a slot this
+      writer wrote is removed and a foreign one is left in place. Declare it in the same commit as
+      the harness bump that brings this option.
+    '';
+  };
+
+  options.gen.ci.commitHook.prePush = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [ ];
+    example = [ "STATUS/probe-push.zsh" ];
+    description = ''
+      Worktree-relative executables run before every push, in the real checkout, each with git's
+      pre-push arguments (remote name, URL) and the same ref lines on stdin; the first non-zero exit
+      refuses the push. Written, compared and removed like `postCommit`. Declare it in the same
       commit as the harness bump that brings this option.
     '';
   };
@@ -440,6 +468,8 @@ in
           inherit pkgs;
           inherit (config.pre-commit.settings) package configFile;
           chained = commitHookChained;
+          postCommit = commitHookPostCommit;
+          prePush = commitHookPrePush;
           # The enabled hooks that read the whole tree. A commit none of them fires on exports only
           # its staged files (staged-commit-hook.nix, "WHY THE EXPORT IS SPARSE").
           wholeTree = lib.mapAttrsToList (_: h: if h.always_run then "" else h.files) (

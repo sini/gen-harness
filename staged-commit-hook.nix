@@ -12,7 +12,8 @@
 # it only by judging the working tree instead of the commit. So this is a construction: the hooks
 # run in an EXPORT of the tree the commit records, and the shared checkout is only read.
 #
-# `{ pkgs, package, configFile, chained ? [ ], wholeTree ? null }` -> `{ hook; install; }`:
+# `{ pkgs, package, configFile, chained ? [ ], wholeTree ? null, postCommit ? [ ], prePush ? [ ] }`
+#   -> `{ hook; install; postCommitHook; prePushHook; }`:
 #   hook     the hook script, a store derivation. It names `package` and `configFile` by store
 #            path, so its closure holds both and one GC root on it keeps the hook runnable.
 #   install  the slot writer, run at devshell entry (stderr only).
@@ -25,6 +26,18 @@
 #            are handed (`pass_filenames = false`, or `always_run`, which is `""`). A commit whose
 #            staged paths match none of them exports only the staged files. `null` (the default)
 #            exports the whole tree on every commit, as before.
+#   postCommit  worktree-relative executables run, in order, after every commit, in the real checkout.
+#            Each runs even when an earlier one failed; git ignores a post-commit hook's status, so a
+#            failure is reported on stderr and nothing more. The declared home of a hook that
+#            records what a commit left behind.
+#   prePush  worktree-relative executables run before every push, in the real checkout, each with
+#            git's arguments (remote name, URL) and the same ref lines on stdin. The first non-zero
+#            exit refuses the push.
+#   postCommitHook, prePushHook  the slot scripts, `null` when nothing is declared for the slot.
+#
+# The two further slots are written, compared and removed by the same writer: a declared slot is
+# written whole at devshell entry; a slot this writer wrote that is no longer declared is removed;
+# a slot it did not write is left in place and named.
 #
 # ★ WHY THE EXPORT IS SPARSE WHEN IT CAN BE. A full export writes every tracked file. Measured on
 # den-ag-design (721,158 files, 4.2 GB): about 29 s per commit for `checkout-index -a`, against 2.8 s
@@ -39,6 +52,8 @@
   configFile,
   chained ? [ ],
   wholeTree ? null,
+  postCommit ? [ ],
+  prePush ? [ ],
 }:
 let
   marker = "# gen-harness: staged-tree commit hook";
@@ -49,6 +64,39 @@ let
     makeBinPath
     ;
   git = getExe pkgs.git;
+  slotMarker = slot: "# gen-harness: ${slot} hook";
+
+  postCommitHook =
+    if postCommit == [ ] then
+      null
+    else
+      pkgs.writeShellScript "gen-harness-post-commit-hook" ''
+        ${slotMarker "post-commit"} — runs the declared post-commit commands in the real checkout.
+        set -uo pipefail
+        top=$(git rev-parse --show-toplevel)
+        rc=0
+        ${concatMapStrings (c: ''
+          "$top"/${escapeShellArg c} || { rc=$?; echo "gen-harness: post-commit command ${escapeShellArg c} failed (exit $rc)" >&2; }
+        '') postCommit}
+        exit "$rc"
+      '';
+
+  prePushHook =
+    if prePush == [ ] then
+      null
+    else
+      pkgs.writeShellScript "gen-harness-pre-push-hook" ''
+        ${slotMarker "pre-push"} — runs the declared pre-push commands in the real checkout.
+        set -euo pipefail
+        top=$(git rev-parse --show-toplevel)
+        # git hands the ref lines once, on stdin; every command reads the same lines.
+        refs=$(mktemp "''${TMPDIR:-/tmp}/gen-harness-pre-push.XXXXXX")
+        trap 'rm -f "$refs"' EXIT
+        cat > "$refs"
+        ${concatMapStrings (c: ''
+          "$top"/${escapeShellArg c} "$@" < "$refs"
+        '') prePush}
+      '';
 
   hook = pkgs.writeShellScript "gen-harness-staged-commit-hook" ''
     ${marker} — runs the pre-commit hooks against the STAGED tree, exported to a throwaway
@@ -158,6 +206,46 @@ let
       echo "gen-harness: $hooks/pre-commit.legacy no longer runs: pre-commit's shim chained it, this hook does not. Declare it in gen.ci.commitHook.chained."
     fi
 
+    ${concatMapStrings
+      ({ slot, script }: ''
+        slot=$hooks/${slot}
+        ${
+          if script == null then
+            ''
+              if [ -f "$slot" ] && grep -qF ${escapeShellArg (slotMarker slot)} "$slot"; then
+                rm -f "$slot"
+                echo "gen-harness: removed the ${slot} hook at $slot: nothing is declared for it any more."
+              fi
+            ''
+          else
+            ''
+              nix-store --add-root "$common_dir/gen-harness-${slot}" --indirect --realise ${script} >/dev/null
+              if ! cmp -s ${script} "$slot"; then
+                if [ -e "$slot" ] && ! grep -qF ${escapeShellArg (slotMarker slot)} "$slot"; then
+                  echo "gen-harness: NOT installing the ${slot} hook: $slot was not written by gen-harness, so it is left in place. Move it aside and re-enter the devshell; a command it ran belongs in its gen.ci.commitHook option."
+                else
+                  tmp=$(mktemp "$hooks/.${slot}.XXXXXX")
+                  cat ${script} > "$tmp"
+                  chmod +x "$tmp"
+                  mv -f "$tmp" "$slot"
+                  echo "gen-harness: installed the ${slot} hook at $slot"
+                fi
+              fi
+            ''
+        }
+      '')
+      [
+        {
+          slot = "post-commit";
+          script = postCommitHook;
+        }
+        {
+          slot = "pre-push";
+          script = prePushHook;
+        }
+      ]
+    }
+
     # git-hooks.nix's installer wrote `core.hooksPath` RELATIVE to the top-level, and in a linked
     # worktree, whose `.git` is a pointer file, that names nothing: git runs no hook and the commit
     # lands ungated. git's default already resolves to the common dir, so it is removed, not fixed.
@@ -177,5 +265,10 @@ let
   '';
 in
 {
-  inherit hook install;
+  inherit
+    hook
+    install
+    postCommitHook
+    prePushHook
+    ;
 }

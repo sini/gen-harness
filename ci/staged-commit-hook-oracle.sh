@@ -1,6 +1,8 @@
 # The cells of `checks.staged-commit-hook` (`staged-commit-hook.nix`). Deterministic: no inotify and
 # no timing — the hooks THEMSELVES observe and write the checkout inside the commit's own window.
-# Env: HOOK and INSTALL (the shipped `stagedCommitHook` outputs), CONFIG (the config the hook bakes).
+# Env: HOOK, INSTALL, POST_HOOK and PUSH_HOOK (the shipped `stagedCommitHook` outputs, built with
+# one chained, two post-commit and one pre-push command), INSTALL_BARE (the writer of the same
+# construction with no post-commit or pre-push command declared).
 # Prints one PASS/FAIL line per cell; the caller holds the count.
 set -uo pipefail
 work=$(mktemp -d)
@@ -27,7 +29,13 @@ printf 'base\n' | tee u.txt w.txt c.txt > /dev/null
 # The declared chained command: tracked, run in the real checkout before the export.
 printf '#!%s\nif [ -e "$ORACLE_WORK/chain-refuse" ]; then echo CHAIN-REFUSED; exit 1; fi\n' "$bash" > chain.sh
 chmod +x chain.sh
-git add u.txt w.txt c.txt chain.sh
+# The declared post-commit commands: the first always fails, the second records where it ran.
+printf '#!%s\nexit 3\n' "$bash" > post-fail.sh
+printf '#!%s\necho "$PWD $(git rev-parse HEAD)" >> "$ORACLE_WORK/post.log"\n' "$bash" > post.sh
+# The declared pre-push command: records its arguments and stdin, refuses on a flag file.
+printf '#!%s\necho "$*" > "$ORACLE_WORK/push.args"; cat > "$ORACLE_WORK/push.stdin"\nif [ -e "$ORACLE_WORK/push-refuse" ]; then echo PUSH-REFUSED; exit 1; fi\n' "$bash" > push.sh
+chmod +x post-fail.sh post.sh push.sh
+git add u.txt w.txt c.txt chain.sh post-fail.sh post.sh push.sh
 git commit -qm base --no-verify
 common=$(git rev-parse --path-format=absolute --git-common-dir)
 
@@ -41,7 +49,12 @@ cmp -s "$HOOK" .git/hooks/pre-commit && r=same || r=differs
 cell install-replaces-stock-shim "$r" same
 cell install-removes-retired-post-checkout "$([ -e .git/hooks/post-checkout ] && echo present || echo absent)" absent
 cell install-removes-hooksPath "$(git config --get core.hooksPath || echo unset)" unset
-cell install-gc-roots-the-hook "$(cat "$work/nix-store.args")" "--add-root $common/gen-harness-pre-commit --indirect --realise $HOOK"
+cell install-gc-roots-the-hook "$(sed -n 1p "$work/nix-store.args")" "--add-root $common/gen-harness-pre-commit --indirect --realise $HOOK"
+cell install-gc-roots-the-slots "$(sed -n '2,3p' "$work/nix-store.args" | tr '\n' ' ')" "--add-root $common/gen-harness-post-commit --indirect --realise $POST_HOOK --add-root $common/gen-harness-pre-push --indirect --realise $PUSH_HOOK "
+cmp -s "$POST_HOOK" .git/hooks/post-commit && r=same || r=differs
+cell install-writes-post-commit "$r" same
+cmp -s "$PUSH_HOOK" .git/hooks/pre-push && r=same || r=differs
+cell install-writes-pre-push "$r" same
 ino=$(stat -c %i .git/hooks/pre-commit)
 "$INSTALL" > "$work/install2.log" 2>&1
 cell install-compares-before-writing "$(stat -c %i .git/hooks/pre-commit)" "$ino"
@@ -56,6 +69,13 @@ fsha=$(cat "$foreign/.git/hooks/pre-commit" "$foreign/.git/hooks/post-checkout" 
 (cd "$foreign" && "$INSTALL") > "$work/install3.log" 2>&1
 cell install-keeps-foreign-slot "$(grep -c 'NOT installing' "$work/install3.log")" 1
 cell install-keeps-foreign-post-checkout "$(cat "$foreign/.git/hooks/pre-commit" "$foreign/.git/hooks/post-checkout" | sha256sum)" "$fsha"
+foreign2=$work/foreign2
+mkdir -p "$foreign2"
+git -C "$foreign2" init -q
+printf '#!/bin/sh\n# someone else'"'"'s post-commit\n' > "$foreign2/.git/hooks/post-commit"
+f2sha=$(sha256sum < "$foreign2/.git/hooks/post-commit")
+(cd "$foreign2" && "$INSTALL") > "$work/install4.log" 2>&1
+cell install-keeps-foreign-post-commit "$(grep -c 'NOT installing the post-commit' "$work/install4.log"):$(sha256sum < "$foreign2/.git/hooks/post-commit")" "1:$f2sha"
 
 # ── the hook ──
 # Every commit below runs under a private TMPDIR, which must be empty after it: a hook that `exec`s
@@ -141,6 +161,33 @@ git commit -qm wt-green > "$work/7b.log" 2>&1
 rc=$?
 cell worktree-staged-green-lands "$rc:$(sha256sum u.txt | cut -c1-64)" "0:$wbefore"
 cd "$repo" || exit 1
+# 8. the post-commit slot: every declared command runs in the real checkout, a failure does not stop
+# the next one, and the commit stands
+reset
+: > "$work/post.log"
+echo goodpost > c.txt
+git add c.txt
+git commit -qm post > "$work/8.log" 2>&1
+rc=$?
+cell post-commit-commit-stands "$rc" 0
+cell post-commit-runs-in-checkout-after-a-failure "$(cat "$work/post.log")" "$repo $(git rev-parse HEAD)"
+cell post-commit-names-the-failure "$(grep -c "post-commit command post-fail.sh failed (exit 3)" "$work/8.log")" 1
+# 9. the pre-push slot: git's arguments and ref lines reach the command; its refusal refuses
+git init -q --bare "$work/remote.git"
+git remote add origin "$work/remote.git"
+touch "$work/push-refuse"
+git push -q origin main > "$work/9.log" 2>&1
+rc=$?
+rm -f "$work/push-refuse"
+cell pre-push-refusal-refuses "$rc:$(grep -c PUSH-REFUSED "$work/9.log"):$(git -C "$work/remote.git" rev-parse -q --verify main || echo absent)" "1:1:absent"
+git push -q origin main > "$work/9b.log" 2>&1
+rc=$?
+cell pre-push-pass-lands "$rc:$(git -C "$work/remote.git" rev-parse main)" "0:$(git rev-parse main)"
+cell pre-push-gets-git-arguments "$(cat "$work/push.args")" "origin $work/remote.git"
+cell pre-push-gets-ref-lines "$(cut -d' ' -f1 "$work/push.stdin")" "refs/heads/main"
+# 10. with the slots no longer declared, the writer removes what it wrote, and only that
+"$INSTALL_BARE" > "$work/install5.log" 2>&1
+cell install-removes-undeclared-slots "$([ -e .git/hooks/post-commit ] && echo pc)$([ -e .git/hooks/pre-push ] && echo pp)" ""
 cell no-export-leaked "$(find "$TMPDIR" -mindepth 1 -maxdepth 1 | wc -l)" 0
 if [ "$fail" != 0 ]; then
   for f in "$work"/*.log; do echo "── $f"; cat "$f"; done
