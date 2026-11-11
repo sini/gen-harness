@@ -21,7 +21,9 @@
 #            git's hook environment intact (so `GIT_INDEX_FILE` still names the recorded tree), and
 #            a non-zero exit refuses the commit. The declared home of a command a consumer used to
 #            prepend to the slot by hand, which the writer below would otherwise erase. Each must
-#            only read the checkout.
+#            only read the checkout. In all three slots a declared command the committing revision
+#            does not carry is skipped and named, and one it carries that the disk lacks refuses
+#            (`presentFn` below).
 #   wholeTree  the `files` regexes of the hooks that read the WHOLE tree rather than the files they
 #            are handed (`pass_filenames = false`, or `always_run`, which is `""`). A commit whose
 #            staged paths match none of them exports only the staged files. `null` (the default)
@@ -60,11 +62,45 @@ let
   inherit (pkgs.lib)
     escapeShellArg
     concatMapStrings
+    optionalString
     getExe
     makeBinPath
     ;
   git = getExe pkgs.git;
   slotMarker = slot: "# gen-harness: ${slot} hook";
+  # ★ THE SLOTS ARE SHARED, THE DECLARATIONS ARE PER REVISION. Every linked worktree runs the one
+  # common-dir slot, written by whichever worktree last entered its devshell, so a declared command
+  # can be one the committing revision never carried: running it there refused every commit on every
+  # other branch (den-ag-design, 2026-11-11, two minutes). Presence is judged by the REVISION, never
+  # by the disk, so a gate cannot fail open by going missing:
+  #   on disk                                    run it; its exit is the verdict
+  #   in the recorded tree or HEAD, not on disk  refuse: a tracked gate is missing, or this commit
+  #                                              deletes it (deleting a gate is a deliberate act)
+  #   in neither                                 skip, named: this revision does not carry it
+  presentFn = ''
+    gen_harness_present() {
+      if [ -e "$top/$1" ]; then return 0; fi
+      if git -C "$top" ls-files --error-unmatch -- "$1" >/dev/null 2>&1 \
+        || git -C "$top" cat-file -e "HEAD:$1" 2>/dev/null; then
+        echo "gen-harness: refused: $1 is declared and tracked in this revision but missing from the worktree, or this commit deletes it. Restore it (git checkout HEAD -- $1), or delete it past the gate deliberately." >&2
+        return 2
+      fi
+      echo "gen-harness: skipped $1: this revision does not carry it." >&2
+      return 1
+    }
+  '';
+  # One declared command: run it when the revision carries it, else skip or refuse (`presentFn`).
+  # `onRefuse` is what a refusal does in the slot; `run` is the invocation.
+  runDeclared =
+    { onRefuse, run }:
+    c: ''
+      p=0; gen_harness_present ${escapeShellArg c} || p=$?
+      case $p in
+        0) ${run c} ;;
+        1) ;;
+        *) ${onRefuse} ;;
+      esac
+    '';
 
   postCommitHook =
     if postCommit == [ ] then
@@ -74,10 +110,14 @@ let
         ${slotMarker "post-commit"} — runs the declared post-commit commands in the real checkout.
         set -uo pipefail
         top=$(git rev-parse --show-toplevel)
+        ${presentFn}
         rc=0
-        ${concatMapStrings (c: ''
-          "$top"/${escapeShellArg c} || { rc=$?; echo "gen-harness: post-commit command ${escapeShellArg c} failed (exit $rc)" >&2; }
-        '') postCommit}
+        ${concatMapStrings (runDeclared {
+          onRefuse = "rc=1";
+          run =
+            c:
+            ''"$top"/${escapeShellArg c} || { rc=$?; echo "gen-harness: post-commit command ${escapeShellArg c} failed (exit $rc)" >&2; }'';
+        }) postCommit}
         exit "$rc"
       '';
 
@@ -93,9 +133,11 @@ let
         refs=$(mktemp "''${TMPDIR:-/tmp}/gen-harness-pre-push.XXXXXX")
         trap 'rm -f "$refs"' EXIT
         cat > "$refs"
-        ${concatMapStrings (c: ''
-          "$top"/${escapeShellArg c} "$@" < "$refs"
-        '') prePush}
+        ${presentFn}
+        ${concatMapStrings (runDeclared {
+          onRefuse = "exit 1";
+          run = c: ''"$top"/${escapeShellArg c} "$@" < "$refs"'';
+        }) prePush}
       '';
 
   hook = pkgs.writeShellScript "gen-harness-staged-commit-hook" ''
@@ -103,9 +145,11 @@ let
     # repository; never stashes, checks out or rewrites the working tree.
     set -euo pipefail
     top=$(git rev-parse --show-toplevel)
-    ${concatMapStrings (c: ''
-      "$top"/${escapeShellArg c}
-    '') chained}
+    ${optionalString (chained != [ ]) presentFn}
+    ${concatMapStrings (runDeclared {
+      onRefuse = "exit 1";
+      run = c: ''"$top"/${escapeShellArg c}'';
+    }) chained}
     # The tree `git commit` is about to record. `write-tree` honours GIT_INDEX_FILE, which git
     # points at a temporary index for `git commit -- <paths>` and `git commit -a`.
     tree=$(git write-tree)

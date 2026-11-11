@@ -188,6 +188,38 @@ cell pre-push-gets-ref-lines "$(cut -d' ' -f1 "$work/push.stdin")" "refs/heads/m
 # 10. with the slots no longer declared, the writer removes what it wrote, and only that
 "$INSTALL_BARE" > "$work/install5.log" 2>&1
 cell install-removes-undeclared-slots "$([ -e .git/hooks/post-commit ] && echo pc)$([ -e .git/hooks/pre-push ] && echo pp)" ""
+# 11. the slots are shared and the declarations per revision; presence is judged by the revision
+"$INSTALL" > "$work/install6.log" 2>&1
+git worktree add -q --detach "$work/wt2" HEAD
+cd "$work/wt2" || exit 1
+# 11a. a commit that deletes a declared command refuses: deleting a gate is never silent
+git rm -q chain.sh post.sh post-fail.sh push.sh
+git commit -qm drop > "$work/11a.log" 2>&1
+cell deleting-a-declared-command-refuses "$?:$(grep -c 'refused: chain.sh is declared and tracked' "$work/11a.log")" "1:1"
+# 11b. a revision that does not carry them (deleted past the gate on purpose): each is skipped and
+# named, never run (each refusal flag is set to prove it)
+git commit -qm drop --no-verify > "$work/11b0.log" 2>&1
+touch "$work/chain-refuse" "$work/push-refuse"
+: > "$work/post.log"
+echo goodwt2 > c.txt
+git add c.txt
+git commit -qm undeclared > "$work/11.log" 2>&1
+rc=$?
+cell absent-chained-is-skipped "$rc:$(grep -c 'skipped chain.sh: this revision does not carry it' "$work/11.log")" "0:1"
+cell absent-post-commit-is-skipped "$(cat "$work/post.log"):$(grep -c 'skipped post.sh: this revision does not carry it' "$work/11.log")" ":1"
+git push -q origin HEAD:refs/heads/wt2 > "$work/11b.log" 2>&1
+rc=$?
+cell absent-pre-push-is-skipped "$rc:$(grep -c 'skipped push.sh: this revision does not carry it' "$work/11b.log")" "0:1"
+rm -f "$work/chain-refuse" "$work/push-refuse"
+cd "$repo" || exit 1
+# 11c. a declared command the revision tracks but the disk lacks refuses: a gate cannot fail open
+reset
+rm chain.sh
+echo goodm > c.txt
+git add c.txt
+git commit -qm missing > "$work/11c.log" 2>&1
+cell missing-declared-command-refuses "$?:$(grep -c 'refused: chain.sh is declared and tracked' "$work/11c.log")" "1:1"
+git checkout -q HEAD -- chain.sh
 cell no-export-leaked "$(find "$TMPDIR" -mindepth 1 -maxdepth 1 | wc -l)" 0
 if [ "$fail" != 0 ]; then
   for f in "$work"/*.log; do echo "── $f"; cat "$f"; done

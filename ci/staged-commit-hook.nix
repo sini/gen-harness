@@ -13,7 +13,7 @@
   perSystem =
     { pkgs, ... }:
     let
-      cells = 36;
+      cells = 41;
       witness = pkgs.writeShellScript "witness" ''
         sha256sum "$ORACLE_REPO/u.txt" | cut -c1-64 > "$ORACLE_WORK/in-window.sha"
         if [ -s "$ORACLE_WORK/target" ]; then echo late >> "$ORACLE_REPO/$(cat "$ORACLE_WORK/target")"; fi
