@@ -125,7 +125,9 @@ in
           cp -r ${root} "$TMPDIR/src"
           chmod -R u+w "$TMPDIR/src"
           cp "$lockJsonPath" "$TMPDIR/src/ci/flake.lock"
+          ${pkgs.python3}/bin/python3 ${./error-plane-runner-test.py} ${./error-plane-runner.py}
           PATH="${engine.pkg}/bin:$PATH" ${pkgs.python3}/bin/python3 ${./error-plane-runner.py} "$TMPDIR/src" "path:$TMPDIR/src?dir=ci"
           touch $out
         '';
 }
+

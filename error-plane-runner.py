@@ -28,6 +28,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
@@ -79,6 +80,24 @@ def nix_eval(env, expr):
     )
 
 
+def worker_count(env, cell_count):
+    """Respect the build allocation; never infer a memory budget from host RAM.
+
+    GEN_ERROR_JOBS is an explicit process budget. NIX_BUILD_CORES is supplied
+    by the Nix builder (0 means all cores). Affinity bounds both on Linux.
+    """
+    cpus = os.cpu_count() or 4
+    if hasattr(os, "sched_getaffinity"):
+        cpus = max(1, len(os.sched_getaffinity(0)))
+    raw = env.get("GEN_ERROR_JOBS", env.get("NIX_BUILD_CORES", "0"))
+    if not re.fullmatch(r"[0-9]+", raw):
+        raise ValueError("GEN_ERROR_JOBS/NIX_BUILD_CORES must be a non-negative integer")
+    budget = int(raw)
+    if "GEN_ERROR_JOBS" in env and budget == 0:
+        raise ValueError("GEN_ERROR_JOBS must be positive")
+    return max(1, min(cell_count, cpus, budget or cpus))
+
+
 def main():
     root = sys.argv[1]
     try:
@@ -112,9 +131,22 @@ def main():
         print("0/0 — no error plane: errorPlane.declared is false and testsError holds no cells.")
         return 0
 
+    try:
+        workers = worker_count(env, len(cells))
+    except ValueError as e:
+        print(f"CONTROL FAILED: {e}", file=sys.stderr)
+        return 2
+    print(f"error-plane resources: workers={workers} cells={len(cells)}", file=sys.stderr)
+    timings = {}
+
     def run(c):
         name = ".".join(c["path"])
+        started = time.monotonic()
         q = nix_eval(dict(env, GEN_CELL=json.dumps(c["path"])), CELL)
+        timings[tuple(c["path"])] = time.monotonic() - started
+        # A killed evaluator is not an expected Nix refusal, even with msg="".
+        if q.returncode < 0:
+            return name, f"CONTROL FAILED: evaluator killed by signal {-q.returncode}"
         err = ANSI.sub("", q.stderr)
         if not c["error"]:
             if q.returncode == 0 and q.stdout.strip() == "true":
@@ -126,8 +158,12 @@ def main():
             return name, f"MSGMISS /{c['msg']}/ in: " + errmsg(err)[-800:]
         return name, None
 
-    with ThreadPoolExecutor(os.cpu_count() or 4) as ex:
+    started = time.monotonic()
+    with ThreadPoolExecutor(workers) as ex:
         res = list(ex.map(run, cells))
+    elapsed = time.monotonic() - started
+    print(f"error-plane timing: wall={elapsed:.3f}s cell-sum={sum(timings.values()):.3f}s "
+          f"slowest={max(timings.values()):.3f}s", file=sys.stderr)
     bad = [(n, why) for n, why in res if why is not None]
     for n, why in res:
         print(("❌ " if why else "✅ ") + n)
@@ -139,3 +175,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
