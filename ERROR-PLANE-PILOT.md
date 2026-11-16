@@ -15,14 +15,16 @@ expected-error message.
 The runner prints its chosen worker count, cell count, cell-phase wall time,
 sum of per-cell wall times and slowest cell to stderr. These are timings, not
 RSS measurements or proof of a faster run. Version/listing time is excluded.
-No memory limit is guessed from physical host RAM. Budget concurrent builds
+No memory limit is guessed from physical host RAM. This is a process-count
+budget, not a memory cap; no peak RSS has been measured. Timeout and
+process-group cancellation are not implemented; evaluator calls remain unbounded. Budget concurrent builds
 at the host level before choosing per-build cores: multiple builders multiply
 this process allocation.
 
 Run standalone controls with `python3 error-plane-runner-test.py`; the same
 controls run inside the existing tests-error derivation before the real cells.
 They compare serial and parallel case membership, results and console verdicts,
-and include live false/mismatched-message/signal controls. They do not replace
+and include simulated false/mismatched-message/signal controls (mocked subprocess results). They do not replace
 real evaluator validation.
 
 Before adoption, run the old and new harness against an identical written
@@ -33,7 +35,10 @@ result; include injected expected/value failures and killed-process controls.
 Use the lowest-memory allocation meeting the measured latency target. Do not
 claim a minutes-scale full relock from these runner-only measurements.
 
-Local validation for this patch: eight Python controls passed. Nix is absent
+Local validation for this patch: eight Python controls passed. A separate
+synthetic executable control launched eight distinct evaluator PIDs for eight
+unique cells and observed peak concurrency two at `GEN_ERROR_JOBS=2`. This
+exercises real subprocess scheduling, not Nix evaluation or real signal handling. Nix is absent
 in the editing environment, so the aggregate Nix gates, formatter and real
 three-evaluator workload have not been run. This is an isolated pilot, not an
 approved consumer pin or merge.
