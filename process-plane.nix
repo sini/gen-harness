@@ -149,6 +149,13 @@ pkgs.writeShellApplication {
     fi
 
     "${guard}/bin/${name}-ci-evaluator-closure" "$prog" || exit $?
+    # Members' cells isolate their evaluations under a private NIX_STATE_DIR. With the host's `store = daemon`
+    # the evaluator then dials a daemon socket under that dir, which no daemon serves, and every cell dies
+    # before it evaluates; `auto` is what CI and most hosts resolve, and falls back to a read-only local
+    # store there. Pinned here once, for every member (den-hoag-qbs25 U4).
+    NIX_CONFIG="''${NIX_CONFIG:+''${NIX_CONFIG}
+    }store = auto"
+    export NIX_CONFIG
     exec "$prog"
   '';
   passthru = { inherit guard evaluatorPath; };
