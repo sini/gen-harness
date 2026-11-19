@@ -11,6 +11,8 @@
 #   jobs:
 #     ci:
 #       uses: sini/gen-harness/.github/workflows/evaluators.yml@<the gen-harness rev in ci/flake.lock>
+#       # with: { split-planes: true }   # opt-in: each column runs as two jobs, `<evaluator> / checks`
+#       #                                # and `<evaluator> / process`; off, one job named `<evaluator>`
 #
 # and `relock` keeps that sha equal to the lock; `ci-plane-coverage`'s
 # `caller-ref-is-locked-harness` refuses a skew. gen-harness calls this file LOCALLY
@@ -23,7 +25,9 @@
 # `workflow_call` only: it is never started except through a caller, and gen-harness's own `ci.yml`
 # is that caller for this repository.
 #
-# ★ WHAT A GREEN COLUMN COVERS. Each column's own `nix` evaluates, in-process: every `nix flake
+# ★ WHAT A GREEN COLUMN COVERS (one job, or two under `split-planes`: the checks plane's steps in
+# `<evaluator> / checks`, the process side's in `<evaluator> / process`, each skipped in the other).
+# Each column's own `nix` evaluates, in-process: every `nix flake
 # check` line (so `checks.default`, the batch asserter over `flake.tests`, and every check's
 # derivation) and the ci devShell. A declarer's error plane (declared by its cells, mkCi's
 # `errorPlane.declared`) is one of those checks,
@@ -66,6 +70,12 @@ on:
         description: Where `nix fmt -- --ci` runs.
         type: string
         default: ci
+      # den-hoag-qbs25 U2: a caller opts in only when its process-side work is separable and its run bounds a
+      # relock pass (eligibility E1-E3 in the U2 spec); every other caller keeps one job per column.
+      split-planes:
+        description: Run each column's checks and process planes as two jobs, `<evaluator> / checks` and `<evaluator> / process`. Off, a column is one job named `<evaluator>`.
+        type: boolean
+        default: false
 
 # ★ THE ONE PLACE THE THREE EVALUATORS ARE PINNED. The error plane's engine inputs (gen-harness
 # `flake.nix`: nix-upstream, nix-determinate, nix-lix) carry the same versions, and
@@ -107,13 +117,15 @@ env:
 
 jobs:
   evaluate:
-    name: ${{ matrix.evaluator }}
+    name: ${{ matrix.plane == 'column' && matrix.evaluator || format('{0} / {1}', matrix.evaluator, matrix.plane) }}
     runs-on: ubuntu-latest
     strategy:
       # A red column must never cancel the other two: attribution is the point of the matrix.
       fail-fast: false
       matrix:
         evaluator: [nix, determinate, lix]
+        # den-hoag-qbs25 U2: `column` is today's one job; a caller with `split-planes: true` gets two.
+        plane: ${{ fromJSON(inputs.split-planes && '["checks","process"]' || '["column"]') }}
     defaults:
       run:
         # `bash -eo pipefail`, not the default `bash -e`: a `| tee` must not mask a red.
@@ -255,6 +267,7 @@ jobs:
           exit "$rc"
 
       - name: flake checks
+        if: matrix.plane != 'process'
         env:
           FLAKE_CHECKS: ${{ inputs.flake-checks }}
         run: |
@@ -271,7 +284,7 @@ jobs:
       # Determinate's `nix flake check` does not force devShells (hindsight b9145c57), so a
       # devShell-only defect would be invisible to that column without this.
       - name: ci devShell
-        if: hashFiles('ci/flake.nix') != ''
+        if: matrix.plane != 'process' && hashFiles('ci/flake.nix') != ''
         run: |
           sys=$(nix eval --impure --raw --expr builtins.currentSystem)
           nix eval --raw "./ci#devShells.$sys.default.drvPath"
@@ -286,7 +299,7 @@ jobs:
       # stays the command a local gate runs verbatim; a program that needs no namespace carries no
       # `unshare` and nothing is loaded.
       - name: admit the process plane's own unshare to user namespaces (CI only)
-        if: hashFiles('ci/tests-process.nix') != ''
+        if: matrix.plane != 'checks' && hashFiles('ci/tests-process.nix') != ''
         run: |
           nix develop ./ci --command ci --tests-process --userns-binaries > "$RUNNER_TEMP/userns-binaries"
           while IFS= read -r b; do
@@ -301,7 +314,7 @@ jobs:
           done < "$RUNNER_TEMP/userns-binaries"
 
       - name: process plane (ci --tests-process)
-        if: hashFiles('ci/tests-process.nix') != ''
+        if: matrix.plane != 'checks' && hashFiles('ci/tests-process.nix') != ''
         run: |
           nix develop ./ci --command ci --tests-process | tee "$RUNNER_TEMP/tests-process.log"
           # The cells must have run under THIS column's evaluator. The line is printed by the
@@ -310,11 +323,11 @@ jobs:
           grep -Fxq "evaluator: $(nix-instantiate --version | sed -n 1p)" "$RUNNER_TEMP/tests-process.log"
 
       - name: error plane, by type (nix-unit, on the ci-locked upstream nix-expr)
-        if: ${{ !cancelled() && matrix.evaluator == 'nix' && steps.identity.outputs.error_plane == 'declared' }}
+        if: ${{ !cancelled() && matrix.plane != 'checks' && matrix.evaluator == 'nix' && steps.identity.outputs.error_plane == 'declared' }}
         run: nix develop ./ci --command nix-unit --flake ./ci#testsError
 
       - name: extra
-        if: ${{ !cancelled() && inputs.extra-run != '' }}
+        if: ${{ !cancelled() && matrix.plane != 'checks' && inputs.extra-run != '' }}
         env:
           EXTRA_RUN: ${{ inputs.extra-run }}
         run: bash -eo pipefail -c "$EXTRA_RUN"
