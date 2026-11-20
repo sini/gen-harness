@@ -74,7 +74,8 @@ pkgs.writeShellApplication {
         "carries the input there." \
         "" \
         "  relock           bump every declared input to its own tip, both locks" \
-        "  relock <input>   bump one declared input; an input that FOLLOWS another is refused" \
+        "  relock <input>...  bump each named declared input; every name is checked before any" \
+        "                     moves, and an undeclared or FOLLOWS input refuses the whole call" \
         "" \
         "When nodes actually move, the pre-commit hook is REINSTALLED and the formatter is" \
         "APPLIED, because both are pinned by the locks just bumped and neither follows on its" \
@@ -474,17 +475,38 @@ pkgs.writeShellApplication {
         exit 2
         ;;
 
+      # ★ EVERY NAMED INPUT IS DECIDED BEFORE ANY IS MOVED (den-hoag-3wikl). This branch read `$1`
+      # alone, so `relock <a> <bogus>` bumped `<a>`, never named `<bogus>` and exited 0: the clean
+      # exit this command exists to remove. Each argument now passes every refusal below — option,
+      # declaration, follows — before the first `nix flake update`, so one bad name moves nothing.
       *)
-        input=$mode
-        inRoot=no
-        inCi=no
-        if [ "$rootLocked" = yes ] && hasInput "$rootLock" "$input"; then inRoot=yes; fi
-        if [ -f "$ciLock" ] && hasInput "$ciLock" "$input"; then inCi=yes; fi
+        inputs=("$@")
+        declare -A inRoot inCi repoOf
+        undeclared=()
+        for input in "''${inputs[@]}"; do
+          case "$input" in
+            -*)
+              printf '%s: unknown option %s\n' "$self" "$input" >&2
+              usage
+              exit 2
+              ;;
+          esac
+          inRoot[$input]=no
+          inCi[$input]=no
+          if [ "$rootLocked" = yes ] && hasInput "$rootLock" "$input"; then inRoot[$input]=yes; fi
+          if [ -f "$ciLock" ] && hasInput "$ciLock" "$input"; then inCi[$input]=yes; fi
+          if [ "''${inRoot[$input]}" = no ] && [ "''${inCi[$input]}" = no ]; then undeclared+=("$input"); fi
+        done
 
         # ★ THE REFUSAL. Without it this command is `nix flake update`, which exits 0 on a name no
         # flake here declares and writes nothing — the failure mode the command exists to remove.
-        if [ "$inRoot" = no ] && [ "$inCi" = no ]; then
-          printf '%s: %s is not a declared input of this repository.\n' "$self" "$input" >&2
+        if [ ''${#undeclared[@]} -gt 0 ]; then
+          for input in "''${undeclared[@]}"; do
+            printf '%s: %s is not a declared input of this repository.\n' "$self" "$input" >&2
+          done
+          if [ ''${#inputs[@]} -gt 1 ]; then
+            printf '  Nothing was written: every named input is checked before any is moved.\n' >&2
+          fi
           if [ "$rootLocked" = yes ]; then
             printf '  root  (flake.lock):    %s\n' "$(declared "$rootLock" | tr '\n' ' ')" >&2
           else
@@ -504,33 +526,37 @@ pkgs.writeShellApplication {
         # with a warning, and the carrier lookup below would index the node table with that list
         # and abort with a raw jq exit 5 (measured on gen-demo's `nixpkgs`, which follows
         # `gen/nixpkgs`). It moves when the input it follows moves, so that is what to name.
-        for side in root ci; do
-          if [ "$side" = root ]; then
-            [ "$inRoot" = yes ] || continue
-            lock=$rootLock
-          else
-            [ "$inCi" = yes ] || continue
-            lock=$ciLock
-          fi
-          target=$(jq -r --arg i "$input" '
-            . as $d | $d.nodes[$d.root // "root"].inputs[$i]
-            | if type != "array" then "-" elif length == 0 then "" else join("/") end' "$lock")
-          if [ "$target" != "-" ]; then
-            # An EMPTY path is `follows = ""`: the input is disconnected and follows nothing.
-            printf '%s\n' \
-              "$self: REFUSED, and nothing was written. In the $side lock, $input follows ''${target:-nothing (follows = \"\")}:" \
-              "it has no revision of its own and moves only with what it follows. Run: relock ''${target%%/*}" \
-              "(or bare relock)." >&2
-            exit 1
-          fi
+        for input in "''${inputs[@]}"; do
+          for side in root ci; do
+            if [ "$side" = root ]; then
+              [ "''${inRoot[$input]}" = yes ] || continue
+              lock=$rootLock
+            else
+              [ "''${inCi[$input]}" = yes ] || continue
+              lock=$ciLock
+            fi
+            target=$(jq -r --arg i "$input" '
+              . as $d | $d.nodes[$d.root // "root"].inputs[$i]
+              | if type != "array" then "-" elif length == 0 then "" else join("/") end' "$lock")
+            if [ "$target" != "-" ]; then
+              # An EMPTY path is `follows = ""`: the input is disconnected and follows nothing.
+              printf '%s\n' \
+                "$self: REFUSED, and nothing was written. In the $side lock, $input follows ''${target:-nothing (follows = \"\")}:" \
+                "it has no revision of its own and moves only with what it follows. Run: relock ''${target%%/*}" \
+                "(or bare relock)." >&2
+              exit 1
+            fi
+          done
         done
 
-        # ACT ONE — the root.
-        if [ "$inRoot" = yes ]; then
-          nix flake update "$input" --flake "$root"
-        else
-          printf '  root: %s is not declared there; skipped.\n' "$input"
-        fi
+        # ACT ONE — the root, every named input, before any ci act (as the bare form orders them).
+        for input in "''${inputs[@]}"; do
+          if [ "''${inRoot[$input]}" = yes ]; then
+            nix flake update "$input" --flake "$root"
+          else
+            printf '  root: %s is not declared there; skipped.\n' "$input"
+          fi
+        done
 
         # ACT TWO — `./ci`, THROUGH THE NODE THAT CARRIES THE INPUT THERE. The sibling is usually
         # not a direct input of the ci flake: it arrives under some parent (`gen-harness`, say),
@@ -541,44 +567,47 @@ pkgs.writeShellApplication {
         # KNOWN LIMIT, and it is the right one: only STRING input edges are followed, never the
         # array-valued `follows` edges. A node reachable from a direct input ONLY through a
         # `follows` is not built by that input's subtree, so bumping that input would not move it.
-        repo=""
-        if [ "$inRoot" = yes ]; then
-          repo=$(jq -r --arg i "$input" '
-            ${(import ./lock-node.nix).jq}
-            . as $d
-            | ($d.nodes[$d.root // "root"].inputs[$i]) as $k
-            | (($d.nodes[$k].locked // {}) | lockedRepo) // ""' "$rootLock")
-        fi
-        if [ -f "$ciLock" ]; then
-          carriers=()
-          if [ -n "$repo" ]; then
-            # Captured, never read through `< <(…)`: a process substitution's exit is discarded,
-            # so a jq failure there read as "no input carries it" and left the ci lock behind.
-            rc=0
-            carrierList=$(carriersIn "$ciLock" "$repo") || rc=$?
-            if [ "$rc" -ne 0 ]; then
-              printf '%s\n' \
-                "$self: CONTROL FAILED — ci/flake.lock could not be read to find what carries $repo" \
-                "(jq rc=$rc). The root lock is LEFT AS WRITTEN and ci/flake.lock was not touched." >&2
-              exit 2
-            fi
-            if [ -n "$carrierList" ]; then
-              mapfile -t carriers <<< "$carrierList"
-            fi
-          elif [ "$inCi" = yes ]; then
-            # No resolved repository to trace (a tarball or path input, `nixpkgs` being the
-            # standing case): the ci flake declares the name itself, so that name IS the carrier.
-            carriers=("$input")
+        for input in "''${inputs[@]}"; do
+          repo=""
+          if [ "''${inRoot[$input]}" = yes ]; then
+            repo=$(jq -r --arg i "$input" '
+              ${(import ./lock-node.nix).jq}
+              . as $d
+              | ($d.nodes[$d.root // "root"].inputs[$i]) as $k
+              | (($d.nodes[$k].locked // {}) | lockedRepo) // ""' "$rootLock")
           fi
+          repoOf[$input]=$repo
+          if [ -f "$ciLock" ]; then
+            carriers=()
+            if [ -n "$repo" ]; then
+              # Captured, never read through `< <(…)`: a process substitution's exit is discarded,
+              # so a jq failure there read as "no input carries it" and left the ci lock behind.
+              rc=0
+              carrierList=$(carriersIn "$ciLock" "$repo") || rc=$?
+              if [ "$rc" -ne 0 ]; then
+                printf '%s\n' \
+                  "$self: CONTROL FAILED — ci/flake.lock could not be read to find what carries $repo" \
+                  "(jq rc=$rc). The root lock is LEFT AS WRITTEN and ci/flake.lock was not touched for $input." >&2
+                exit 2
+              fi
+              if [ -n "$carrierList" ]; then
+                mapfile -t carriers <<< "$carrierList"
+              fi
+            elif [ "''${inCi[$input]}" = yes ]; then
+              # No resolved repository to trace (a tarball or path input, `nixpkgs` being the
+              # standing case): the ci flake declares the name itself, so that name IS the carrier.
+              carriers=("$input")
+            fi
 
-          if [ ''${#carriers[@]} -eq 0 ]; then
-            printf '  ci: no input carries %s; ci/flake.lock left alone.\n' "''${repo:-$input}"
-          else
-            for c in "''${carriers[@]}"; do
-              nix flake update "$c" --flake "$ciDir"
-            done
+            if [ ''${#carriers[@]} -eq 0 ]; then
+              printf '  ci: no input carries %s; ci/flake.lock left alone.\n' "''${repo:-$input}"
+            else
+              for c in "''${carriers[@]}"; do
+                nix flake update "$c" --flake "$ciDir"
+              done
+            fi
           fi
-        fi
+        done
         ;;
     esac
 
@@ -636,26 +665,29 @@ pkgs.writeShellApplication {
       if [ -z "$mode" ]; then
         nix flake update --flake "$d"
       else
-        ecarriers=()
-        if [ -n "$repo" ]; then
-          rc=0
-          carrierList=$(carriersIn "$el" "$repo") || rc=$?
-          if [ "$rc" -ne 0 ]; then
-            printf '%s: CONTROL FAILED — %s could not be read to find what carries %s (jq rc=%s).\n' \
-              "$self" "$el" "$repo" "$rc" >&2
-            exit 2
+        for input in "''${inputs[@]}"; do
+          repo=''${repoOf[$input]}
+          ecarriers=()
+          if [ -n "$repo" ]; then
+            rc=0
+            carrierList=$(carriersIn "$el" "$repo") || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              printf '%s: CONTROL FAILED — %s could not be read to find what carries %s (jq rc=%s).\n' \
+                "$self" "$el" "$repo" "$rc" >&2
+              exit 2
+            fi
+            if [ -n "$carrierList" ]; then
+              mapfile -t ecarriers <<< "$carrierList"
+            fi
+          elif hasInput "$el" "$input"; then
+            ecarriers=("$input")
           fi
-          if [ -n "$carrierList" ]; then
-            mapfile -t ecarriers <<< "$carrierList"
+          if [ ''${#ecarriers[@]} -eq 0 ]; then
+            printf '  %s: no input carries %s; left alone.\n' "$rel" "''${repo:-$input}"
           fi
-        elif hasInput "$el" "$input"; then
-          ecarriers=("$input")
-        fi
-        if [ ''${#ecarriers[@]} -eq 0 ]; then
-          printf '  %s: no input carries %s; left alone.\n' "$rel" "''${repo:-$input}"
-        fi
-        for c in "''${ecarriers[@]}"; do
-          nix flake update "$c" --flake "$d"
+          for c in "''${ecarriers[@]}"; do
+            nix flake update "$c" --flake "$d"
+          done
         done
       fi
       rc=0

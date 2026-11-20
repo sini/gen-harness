@@ -874,6 +874,101 @@ let
       forbids = [ "SELF-INPUT" ];
       locks = "unchanged";
     }
+    # ── THE NAMED-INPUT LIST (den-hoag-3wikl). `relock <a> <b>` read `$1` alone and dropped the rest
+    # at rc 0. `updates` is the exact sequence of `nix flake update` calls the stub received, with
+    # the fixture root written `<root>`: an act the arm did not expect, or one it expected and
+    # did not get, reds by name. The single and bare arms pin that the list form left them alone.
+    {
+      label = "several-named-inputs-each-move-root-then-ci";
+      fixture = "two-act";
+      args = [
+        alpha
+        beta
+      ];
+      stubUpdate = "";
+      rc = 0;
+      wants = [ "ci: no input carries ${beta}; ci/flake.lock left alone" ];
+      forbids = [ "is not a declared input" ];
+      locks = "any";
+      updates = [
+        "flake update ${alpha} --flake <root>"
+        "flake update ${beta} --flake <root>"
+        "flake update ${alpha} --flake <root>/ci"
+      ];
+    }
+    {
+      label = "an-undeclared-second-input-refuses-by-name-and-moves-nothing";
+      fixture = "two-act";
+      args = [
+        alpha
+        "no-such-input"
+      ];
+      stubUpdate = "";
+      rc = 1;
+      wants = [
+        "no-such-input is not a declared input"
+        "Nothing was written: every named input is checked before any is moved"
+      ];
+      forbids = [ "${alpha} is not a declared input" ];
+      locks = "unchanged";
+      updates = [ ];
+    }
+    {
+      label = "a-follows-second-input-refuses-and-moves-nothing";
+      fixture = "follows-root";
+      args = [
+        alpha
+        follower
+      ];
+      stubUpdate = "";
+      rc = 1;
+      wants = [ "${follower} follows ${alpha}/nixpkgs" ];
+      forbids = [ ];
+      locks = "unchanged";
+      updates = [ ];
+    }
+    {
+      label = "an-option-after-an-input-is-refused-and-moves-nothing";
+      fixture = "two-act";
+      args = [
+        alpha
+        "--fresh"
+      ];
+      stubUpdate = "";
+      rc = 2;
+      wants = [ "unknown option --fresh" ];
+      forbids = [ ];
+      locks = "unchanged";
+      updates = [ ];
+    }
+    {
+      label = "a-single-named-input-moves-it-root-then-ci";
+      fixture = "two-act";
+      args = [ alpha ];
+      stubUpdate = "";
+      rc = 0;
+      wants = [ ];
+      forbids = [ "is not a declared input" ];
+      locks = "any";
+      updates = [
+        "flake update ${alpha} --flake <root>"
+        "flake update ${alpha} --flake <root>/ci"
+      ];
+    }
+    {
+      label = "bare-relock-moves-every-input-root-then-ci";
+      fixture = "two-act";
+      args = [ ];
+      stubUpdate = "";
+      rc = 0;
+      wants = [ "bumping every declared input to its own tip" ];
+      forbids = [ ];
+      locks = "any";
+      updates = [
+        "flake update --flake <root>"
+        "flake update --flake <root>/ci"
+      ];
+    }
   ];
 
   sh = lib.escapeShellArg;
@@ -887,6 +982,7 @@ let
       echo "stub nix: unexpected invocation: $*" >&2
       exit 97
     fi
+    printf '%s\n' "''${*//"$FLAKE_ROOT"/<root>}" >> "$STUB_LOG"
     for a; do d=$a; done
     case "$d" in
     */ci) if [ -s "$STUB_CI_LOCK" ]; then cp "$STUB_CI_LOCK" "$d/flake.lock"; fi ;;
@@ -1000,7 +1096,7 @@ let
           gitBefore=$(git -C "$TMP/fix" status --porcelain --ignored --untracked-files=all; git -C "$TMP/fix" rev-parse HEAD)
         ''}
         rc=0
-        PATH=$armPath STUB_CI_LOCK="$TMP/stub/ci.lock" STUB_EXAMPLE_LOCK="$TMP/stub/example.lock" FLAKE_ROOT="${arm.flakeRoot or "$TMP/fix"}" ${relock}/bin/${fixtureName}-relock ${
+        PATH=$armPath STUB_LOG="$TMP/stub/updates.log" STUB_CI_LOCK="$TMP/stub/ci.lock" STUB_EXAMPLE_LOCK="$TMP/stub/example.lock" FLAKE_ROOT="${arm.flakeRoot or "$TMP/fix"}" ${relock}/bin/${fixtureName}-relock ${
           lib.concatMapStringsSep " " sh arm.args
         } > "$TMP/out" 2>&1 || rc=$?
 
@@ -1021,6 +1117,14 @@ let
           fi
         ''}
       done
+      ${lib.optionalString (arm ? updates) ''
+        printf '%s' ${sh (lib.concatMapStrings (u: u + "\n") arm.updates)} > "$TMP/updates.want"
+        touch "$TMP/stub/updates.log"
+        if ! diff "$TMP/updates.want" "$TMP/stub/updates.log" > "$TMP/updates.diff"; then
+          fail ${sh arm.label} "the stub's nix flake update calls are not the expected sequence:
+        $(cat "$TMP/updates.diff")"
+        fi
+      ''}
       ${lib.concatMapStrings (f: ''
         if [ -e "$TMP/fix/${f}" ]; then
           fail ${sh arm.label} "${f} exists in the tree, and this arm never writes it"

@@ -208,8 +208,10 @@ evaluate.
 ### `relock`
 
 The devshell's `relock` bumps the repository's locks, root first and then `./ci`: bare `relock`
-moves every declared input to its own tip, and `relock <input>` moves one. An input that `follows`
-another is refused by name, because it moves only with what it follows. Each `examples/<d>/flake.lock`
+moves every declared input to its own tip, and `relock <input>...` moves each one named. Every name
+is checked before any input moves, so one undeclared name refuses the whole call by name and writes
+nothing. An input that `follows` another is refused the same way, because it moves only with what it
+follows. Each `examples/<d>/flake.lock`
 is bumped after both, unless git ignores it (an integration example, below) or it resolves to this
 repository: that one is skipped and named, and a bump that would make it resolve here is restored
 and named.
