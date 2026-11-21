@@ -91,6 +91,7 @@
         ./read-roots-guard.nix
         ./staged-commit-hook.nix
         ./staged-commit-hook-sparse.nix
+        ./memory-cap.nix
         ./agents-md-sheet-arms.nix
         # The harness publishes no root `default.nix`; its surface is the flake's `lib`.
         { gen.ci.rootSurface.entry = "not-owed"; }

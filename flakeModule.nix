@@ -406,12 +406,16 @@ in
         # within the default 8 MB stack. (A prior `ulimit -s unlimited` here masked a regex bug,
         # not eval depth: purity scans called nixpkgs lib.hasInfix, whose `.*needle.*` recurses to
         # depth ∝ string length on whole-file source reads. Fixed by genPrelude.hasInfix.)
+        # Both runners evaluate under the memory cap (`memory-cap.nix`): a commit is the one
+        # evaluation no caller wraps.
+        memoryCap = import ./memory-cap.nix { inherit pkgs name; };
+
         ciNixUnit = pkgs.writeShellApplication {
           name = "${name}-ci-nix-unit";
           runtimeInputs = [ (resolve "nix-unit").packages.${system}.default ];
           text = ''
             "${readRootsGuard}/bin/${name}-ci-read-roots" || exit $?
-            exec nix-unit --flake ./ci#tests "$@"
+            exec "${memoryCap}" nix-unit --flake ./ci#tests "$@"
           '';
         };
 
@@ -424,7 +428,7 @@ in
           runtimeInputs = [ (resolve "nix-unit").packages.${system}.default ];
           text = ''
             "${readRootsGuard}/bin/${name}-ci-read-roots" || exit $?
-            exec nix-unit --flake ./ci#testsError "$@"
+            exec "${memoryCap}" nix-unit --flake ./ci#testsError "$@"
           '';
         };
 
