@@ -11,7 +11,8 @@
 #                                    `$VAR` / `${VAR}` / `$$` in the command's own arguments.
 #   Darwin                           no instrument; the command runs as it is (the cap is Linux-only,
 #                                    omitted on darwin, with no substitute).
-#   Linux, no user manager           the command runs uncapped, and one stderr line names why. Refusing
+#   Linux, no user manager, or a     the command runs uncapped, and one stderr line names why. Refusing
+#   systemd-run rejecting a flag
 #                                    would leave `--no-verify`, which runs no plane at all.
 #
 # The command's exit status is the script's in every arm. A kill at the cap is exit 137 and is
@@ -29,7 +30,10 @@ pkgs.writeShellScript "${name}-memory-cap" ''
     echo "gen-harness: systemd-run is not on PATH, so $1 runs WITHOUT the ${memoryMax} memory cap" >&2
     exec "$@"
   fi
-  if ! why=$(systemd-run --user --scope -q true 2>&1); then
+  # The probe carries the run's whole flag set: a systemd-run that lacks one (systemd < 254 has no
+  # `--expand-environment`) lands here, named, instead of refusing every commit unnamed.
+  if ! why=$(systemd-run --user --scope -q --expand-environment=no \
+    -p MemoryMax=${memoryMax} -p MemorySwapMax=${swapMax} true 2>&1); then
     echo "gen-harness: no systemd user manager ($why), so $1 runs WITHOUT the ${memoryMax} memory cap" >&2
     exec "$@"
   fi
