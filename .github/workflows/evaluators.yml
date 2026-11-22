@@ -98,7 +98,8 @@ env:
   #     nixpkgs); the `nix` column has none, so a `<nixpkgs>` lookup would resolve in two columns only.
   # Installer lines left alone, because they change no evaluation output: max-jobs, cores,
   # always-allow-substitutes, auto-optimise-store, bash-prompt-prefix,
-  # trusted-users, netrc-file. Determinate's lazy-trees is stated at its install step, and its
+  # trusted-users. (netrc-file is the harness's, set through NIX_CONFIG: see
+  # `github archive credential`.) Determinate's lazy-trees is stated at its install step, and its
   # eval-cores is printed, not normalised: the counted runs pin it themselves, per evaluation, through
   # `lib.serialEval`, because a thunk count is defined only for a serial run.
   EVAL_CONF: |
@@ -184,6 +185,34 @@ jobs:
           sudo systemctl start nix-daemon.service
           echo /nix/var/nix/profiles/default/bin >> "$GITHUB_PATH"
 
+      # ★ THE ARCHIVE CREDENTIAL. An eval-time `builtins.fetchTarball` of
+      # `https://github.com/<o>/<r>/archive/<rev>.tar.gz` (the hub's and every member shim's
+      # fixed-output fetch rule) does not read `access-tokens`, so on a cold runner it is anonymous,
+      # and an anonymous one has been refused: an HTTP 403 "Access to this site has been restricted".
+      # The basis for a credential lifting that is GitHub's 2025-05-08 changelog on unauthenticated
+      # limits ("authenticated requests will continue to enjoy higher rate limits"), and a private
+      # archive is served with this line and refused without it. (The per-IP keying of anonymous
+      # requests and the job token's 1,000/h are GitHub's REST API documentation, not a statement
+      # about archive downloads.) All three evaluators send a `netrc-file` credential on that URL.
+      # The job token, masked by the runner, goes to a 0600 file outside the store, written before
+      # NIX_CONFIG names it and kept under $RUNNER_TEMP for the whole job (Lix throws on every
+      # download when netrc-file names a missing file). NIX_CONFIG names it for every later step of
+      # the column, the one channel all three honour: with the line in its extra-conf, Determinate
+      # still ran `netrc-file = /nix/var/determinate/netrc`. A local run has no such file and fetches
+      # as before.
+      - name: github archive credential
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          umask 077
+          printf 'machine github.com login x-access-token password %s\n' "$TOKEN" > "$RUNNER_TEMP/gen-harness.netrc"
+          {
+            echo "NIX_CONFIG<<GEN_HARNESS_NIX_CONFIG"
+            [ -z "${NIX_CONFIG:-}" ] || printf '%s\n' "$NIX_CONFIG"
+            echo "netrc-file = $RUNNER_TEMP/gen-harness.netrc"
+            echo "GEN_HARNESS_NIX_CONFIG"
+          } >> "$GITHUB_ENV"
+
       # No cache step in any column (den-hoag-uer2v). magic-nix-cache's Post step re-uploads what the
       # same job just downloaded, serially, and on identical code its duration swings from 1 s to 300 s:
       # 59.0 of the nix column's 101.9 job-minutes in relock 37's first pass. It left the determinate
@@ -208,6 +237,12 @@ jobs:
               esac
             done
           done <<< "$RELEASE_CACHE_CONF"
+          # The archive credential: the column's evaluator names the harness's netrc, and that file
+          # is 0600 with a github.com line. Read, never printed.
+          nf=$(nix config show netrc-file)
+          echo "netrc-file = $nf"
+          [ "$nf" = "$RUNNER_TEMP/gen-harness.netrc" ] || { echo "::error::the ${{ matrix.evaluator }} column runs 'netrc-file = $nf', not the harness's archive credential"; rc=1; }
+          { [ "$(stat -c %a "$nf")" = 600 ] && grep -q '^machine github\.com ' "$nf"; } || { echo "::error::'$nf' is not a 0600 netrc holding a github.com line"; rc=1; }
           exit "$rc"
 
       - name: evaluator identity
