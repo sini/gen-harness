@@ -98,7 +98,8 @@ env:
   #     nixpkgs); the `nix` column has none, so a `<nixpkgs>` lookup would resolve in two columns only.
   # Installer lines left alone, because they change no evaluation output: max-jobs, cores,
   # always-allow-substitutes, auto-optimise-store, bash-prompt-prefix,
-  # trusted-users, netrc-file. Determinate's lazy-trees is stated at its install step, and its
+  # trusted-users. (netrc-file is the harness's, stated at each install step: see
+  # `github archive credential`.) Determinate's lazy-trees is stated at its install step, and its
   # eval-cores is printed, not normalised: the counted runs pin it themselves, per evaluation, through
   # `lib.serialEval`, because a thunk count is defined only for a serial run.
   EVAL_CONF: |
@@ -133,6 +134,20 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # ★ THE ARCHIVE CREDENTIAL. An eval-time `builtins.fetchTarball` of
+      # `https://github.com/<o>/<r>/archive/<rev>.tar.gz` (the hub's and every member shim's
+      # fixed-output fetch rule) does not read `access-tokens`, so on a cold runner it is anonymous
+      # and meets GitHub's unauthenticated limit: an HTTP 403 "Access to this site has been
+      # restricted". A netrc credential is sent on that URL by all three evaluators. The job token
+      # is masked by the runner; it is written to a 0600 file outside the store, before any
+      # installer runs, and each installer's `netrc-file` names it.
+      - name: github archive credential
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          umask 077
+          printf 'machine github.com login x-access-token password %s\n' "$TOKEN" > "$RUNNER_TEMP/gen-harness.netrc"
+
       - name: install upstream Nix ${{ env.NIX_VERSION }}
         if: matrix.evaluator == 'nix'
         uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
@@ -144,6 +159,7 @@ jobs:
           extra_nix_config: |
             ${{ env.EVAL_CONF }}
             ${{ env.RELEASE_CACHE_CONF }}
+            netrc-file = ${{ runner.temp }}/gen-harness.netrc
 
       - name: install Determinate Nix ${{ env.DETERMINATE_VERSION }}
         if: matrix.evaluator == 'determinate'
@@ -156,6 +172,7 @@ jobs:
             lazy-trees = true
             ${{ env.EVAL_CONF }}
             ${{ env.RELEASE_CACHE_CONF }}
+            netrc-file = ${{ runner.temp }}/gen-harness.netrc
 
       # ★ THE STANDALONE DAEMON, NOT THE SOCKET. Lix 2.96's per-connection daemon (`nix-daemon@.service`,
       # `--for-socket-activation`) takes its protocol from LISTEN_FDNAMES, and the installer starts
@@ -180,7 +197,8 @@ jobs:
             --extra-conf "access-tokens = github.com=$TOKEN" \
             --extra-conf "trusted-users = root $USER" \
             --extra-conf "$EVAL_CONF" \
-            --extra-conf "$RELEASE_CACHE_CONF"
+            --extra-conf "$RELEASE_CACHE_CONF" \
+            --extra-conf "netrc-file = $RUNNER_TEMP/gen-harness.netrc"
           sudo systemctl start nix-daemon.service
           echo /nix/var/nix/profiles/default/bin >> "$GITHUB_PATH"
 
@@ -208,6 +226,12 @@ jobs:
               esac
             done
           done <<< "$RELEASE_CACHE_CONF"
+          # The archive credential: the column's evaluator names the harness's netrc, and that file
+          # is 0600 with a github.com line. Read, never printed.
+          nf=$(nix config show netrc-file)
+          echo "netrc-file = $nf"
+          [ "$nf" = "$RUNNER_TEMP/gen-harness.netrc" ] || { echo "::error::the ${{ matrix.evaluator }} column runs 'netrc-file = $nf', not the harness's archive credential"; rc=1; }
+          { [ "$(stat -c %a "$nf")" = 600 ] && grep -q '^machine github\.com ' "$nf"; } || { echo "::error::'$nf' is not a 0600 netrc holding a github.com line"; rc=1; }
           exit "$rc"
 
       - name: evaluator identity
