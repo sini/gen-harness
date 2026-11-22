@@ -174,6 +174,11 @@ every commit touching a test cell. A hand-typed `nix-unit --flake ./ci#tests` is
 neither is `nix flake check ./ci`: both read the git-filtered copy and report green over the cell
 they cannot see. So `nix develop ./ci --command ci` is the command to run the suites and checks by.
 
+The `ci` and `ci-error` hooks also run `nix-unit` under a memory cap (`memory-cap.nix`): a
+`systemd-run --user --scope` with `MemoryMax=12G` and `MemorySwapMax=2G`, outside the committing
+shell's cgroup, passing the exit status through and naming a 137. Where the cap cannot be applied
+the hook runs uncapped and prints one stderr line naming why; on Darwin it runs uncapped and silent.
+
 The refusal covers every git-unknown byte under a root, whatever its extension or name — a file the
 collector would skip, `_`-prefixed or not `.nix`, refuses too, because the root is also a read
 domain. The remedy is always the same: `git add` the file, or move it out from under the root.
