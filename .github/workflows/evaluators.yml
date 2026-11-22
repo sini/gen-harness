@@ -98,7 +98,7 @@ env:
   #     nixpkgs); the `nix` column has none, so a `<nixpkgs>` lookup would resolve in two columns only.
   # Installer lines left alone, because they change no evaluation output: max-jobs, cores,
   # always-allow-substitutes, auto-optimise-store, bash-prompt-prefix,
-  # trusted-users. (netrc-file is the harness's, stated at each install step: see
+  # trusted-users. (netrc-file is the harness's, set through NIX_CONFIG: see
   # `github archive credential`.) Determinate's lazy-trees is stated at its install step, and its
   # eval-cores is printed, not normalised: the counted runs pin it themselves, per evaluation, through
   # `lib.serialEval`, because a thunk count is defined only for a serial run.
@@ -134,20 +134,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # ★ THE ARCHIVE CREDENTIAL. An eval-time `builtins.fetchTarball` of
-      # `https://github.com/<o>/<r>/archive/<rev>.tar.gz` (the hub's and every member shim's
-      # fixed-output fetch rule) does not read `access-tokens`, so on a cold runner it is anonymous
-      # and meets GitHub's unauthenticated limit: an HTTP 403 "Access to this site has been
-      # restricted". A netrc credential is sent on that URL by all three evaluators. The job token
-      # is masked by the runner; it is written to a 0600 file outside the store, before any
-      # installer runs, and each installer's `netrc-file` names it.
-      - name: github archive credential
-        env:
-          TOKEN: ${{ github.token }}
-        run: |
-          umask 077
-          printf 'machine github.com login x-access-token password %s\n' "$TOKEN" > "$RUNNER_TEMP/gen-harness.netrc"
-
       - name: install upstream Nix ${{ env.NIX_VERSION }}
         if: matrix.evaluator == 'nix'
         uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
@@ -159,7 +145,6 @@ jobs:
           extra_nix_config: |
             ${{ env.EVAL_CONF }}
             ${{ env.RELEASE_CACHE_CONF }}
-            netrc-file = ${{ runner.temp }}/gen-harness.netrc
 
       - name: install Determinate Nix ${{ env.DETERMINATE_VERSION }}
         if: matrix.evaluator == 'determinate'
@@ -172,7 +157,6 @@ jobs:
             lazy-trees = true
             ${{ env.EVAL_CONF }}
             ${{ env.RELEASE_CACHE_CONF }}
-            netrc-file = ${{ runner.temp }}/gen-harness.netrc
 
       # ★ THE STANDALONE DAEMON, NOT THE SOCKET. Lix 2.96's per-connection daemon (`nix-daemon@.service`,
       # `--for-socket-activation`) takes its protocol from LISTEN_FDNAMES, and the installer starts
@@ -197,10 +181,31 @@ jobs:
             --extra-conf "access-tokens = github.com=$TOKEN" \
             --extra-conf "trusted-users = root $USER" \
             --extra-conf "$EVAL_CONF" \
-            --extra-conf "$RELEASE_CACHE_CONF" \
-            --extra-conf "netrc-file = $RUNNER_TEMP/gen-harness.netrc"
+            --extra-conf "$RELEASE_CACHE_CONF"
           sudo systemctl start nix-daemon.service
           echo /nix/var/nix/profiles/default/bin >> "$GITHUB_PATH"
+
+      # ★ THE ARCHIVE CREDENTIAL. An eval-time `builtins.fetchTarball` of
+      # `https://github.com/<o>/<r>/archive/<rev>.tar.gz` (the hub's and every member shim's
+      # fixed-output fetch rule) does not read `access-tokens`, so on a cold runner it is anonymous
+      # and meets GitHub's limit on unauthenticated requests, which is per runner IP: an HTTP 403
+      # "Access to this site has been restricted". All three evaluators send a `netrc-file`
+      # credential on that URL. The job token, masked by the runner, goes to a 0600 file outside
+      # the store; NIX_CONFIG names the file for every later step of the column, the one channel
+      # all three honour: with the line in its extra-conf, Determinate still ran
+      # `netrc-file = /nix/var/determinate/netrc`. A local run has no such file and fetches as before.
+      - name: github archive credential
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          umask 077
+          printf 'machine github.com login x-access-token password %s\n' "$TOKEN" > "$RUNNER_TEMP/gen-harness.netrc"
+          {
+            echo "NIX_CONFIG<<GEN_HARNESS_NIX_CONFIG"
+            [ -z "${NIX_CONFIG:-}" ] || printf '%s\n' "$NIX_CONFIG"
+            echo "netrc-file = $RUNNER_TEMP/gen-harness.netrc"
+            echo "GEN_HARNESS_NIX_CONFIG"
+          } >> "$GITHUB_ENV"
 
       # No cache step in any column (den-hoag-uer2v). magic-nix-cache's Post step re-uploads what the
       # same job just downloaded, serially, and on identical code its duration swings from 1 s to 300 s:
