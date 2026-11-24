@@ -8,7 +8,8 @@
 # pure — so a column builds only its own family's engine, and the other two inputs are never fetched.
 # `filterAttrs` is the one builtin separating Determinate from upstream at their pinned releases; if
 # upstream gains it, the `evaluator identity` step of `evaluators.yml` refuses the misdetection by
-# store path.
+# store path for an error-plane declarer (it compares only the version line for anyone else), and
+# `process-plane.nix`'s `lockEvaluator`, which binds the same family, prints `pinned` in that column.
 #
 # ★ ONE SOURCE FOR THE COLUMN'S CONFIGURATION. `evaluators.yml`'s `EVAL_CONF` block is what every
 # installer is handed and what `evaluator identity` reads back; it is read here from the same file,

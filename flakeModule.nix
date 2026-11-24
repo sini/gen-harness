@@ -463,7 +463,12 @@ in
           scanner = selfInput.scanner;
         };
 
-        processPlaneCmd = import ./process-plane.nix { inherit pkgs name; };
+        # Its `lockEvaluator` binds the engine of the family evaluating this devshell: the rule and
+        # binding `checks.tests-error` and `errorPlane.engine` take (`error-plane-engines.nix`).
+        processPlaneCmd = import ./process-plane.nix {
+          inherit pkgs name;
+          lockEngines = import ./error-plane-engines.nix { inherit lib genInputs system; };
+        };
 
         # The commit hook and its slot writer, PUBLISHED (`flake.nix`'s `lib.stagedCommitHook`) so
         # the hub installs the same construction. git-hooks.nix keeps generating the config
@@ -752,9 +757,11 @@ in
                   return 1
                 }
 
-                # `ci --tests-error`: the error plane judged by the `nix` on PATH, not by the
-                # nix-expr nix-unit links — the evaluator-neutral runner a matrix column needs
-                # (`error-plane-runner.py` states its predicate). An ARGUMENT of this command rather
+                # `ci --tests-error`: the error plane judged by the ci lock's engine of the family
+                # evaluating this devshell (`lockEvaluator`: the column's own binary in CI, the pinned
+                # engine elsewhere), not by the nix-expr nix-unit links — the evaluator-neutral
+                # runner a matrix column needs (`error-plane-runner.py` states its predicate),
+                # and the engine `checks.tests-error` runs. An ARGUMENT of this command rather
                 # than a command of its own, and a flag rather than a word so it can never shadow a
                 # suite name. It runs AFTER the guard above, as every wired testsError invocation
                 # must (den-hoag-a0ig9): an untracked cell file is as invisible to it as to nix-unit.
@@ -764,7 +771,8 @@ in
                 # Both run whatever the other says; the runner's rc wins when it is non-zero.
                 if [ "''${1:-}" = "--tests-error" ]; then
                   rc=0
-                  ${pkgs.python3}/bin/python3 ${./error-plane-runner.py} "$FLAKE_ROOT" || rc=$?
+                  "${processPlaneCmd.lockEvaluator}/bin/${name}-ci-lock-evaluator" "$FLAKE_ROOT" \
+                    ${pkgs.python3}/bin/python3 ${./error-plane-runner.py} "$FLAKE_ROOT" || rc=$?
                   names=$(declaredChecks) || exit $?
                   if [[ " $names " == *" tests-error "* ]]; then
                     buildChecks tests-error || { [ "$rc" -ne 0 ] || rc=1; }
@@ -772,8 +780,8 @@ in
                   exit "$rc"
                 fi
 
-                # `ci --tests-process`: the process plane (`apps.<system>.tests-process`) run under
-                # the `nix` on PATH, after the same guard, for the same reason (`process-plane.nix`
+                # `ci --tests-process`: the process plane (`apps.<system>.tests-process`) run on the
+                # same `lockEvaluator` engine, after the same guard, for the same reason (`process-plane.nix`
                 # states the consumer's contract and refuses a program carrying an evaluator).
                 # `ci --tests-process --userns-binaries` lists the program's own `unshare` binaries
                 # for the CI step that admits them to user namespaces, and runs no cell.

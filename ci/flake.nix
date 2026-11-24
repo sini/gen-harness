@@ -79,7 +79,8 @@
       # `expr`/`expected` pair can express, and three of them are verdicts of the column's own
       # evaluator, so they run as a program under `ci --tests-process`, never as a check.
       # `process-plane-guard.nix` adds a flake CHECK: the `ci --tests-process` closure guard's exit
-      # codes and messages over real fixture closures. `agents-md-sheet-arms.nix` adds a flake CHECK
+      # codes and messages over real fixture closures. `lock-evaluator.nix` adds a flake CHECK: the
+      # process plane's lock-evaluator arms over a stub engine. `agents-md-sheet-arms.nix` adds a flake CHECK
       # too: `agents-md-citations`'s declaration arms, run as the shipped builder over fixture roots.
       # `staged-commit-hook.nix` adds a flake CHECK: the published commit hook and its writer, run over
       # git fixtures in the sandbox with an exact cell count. `staged-commit-hook-sparse.nix` adds its
@@ -88,6 +89,7 @@
         ./tests-error.nix
         ./tests-process.nix
         ./process-plane-guard.nix
+        ./lock-evaluator.nix
         ./read-roots-guard.nix
         ./staged-commit-hook.nix
         ./staged-commit-hook-sparse.nix

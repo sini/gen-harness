@@ -108,9 +108,21 @@
     lib.relock = import ./relock.nix;
 
     # `ci --tests-process`, published for the same reason as `lib.relock`: its guard
-    # (`passthru.guard`) is driven by this repository's own `process-plane-guard` check, which can
-    # only name what is published. `{ pkgs, name }` -> the command derivation.
-    lib.processPlane = import ./process-plane.nix;
+    # (`passthru.guard`) and its `passthru.lockEvaluator` are driven by this repository's own
+    # `process-plane-guard` and `lock-evaluator` checks, which can only name what is published.
+    # `{ pkgs, name, lockEngines ? <this flake's engines> }` -> the command derivation; the
+    # `lock-evaluator` check hands stub engines.
+    lib.processPlane =
+      {
+        pkgs,
+        name,
+        lockEngines ? import ./error-plane-engines.nix {
+          inherit (pkgs) lib;
+          genInputs = inputs;
+          system = pkgs.stdenv.hostPlatform.system;
+        },
+      }:
+      import ./process-plane.nix { inherit pkgs name lockEngines; };
 
     # The counted runs' serial options (`serial-eval.bash`), for every runner that reads
     # `NIX_SHOW_STATS` counters: a thunk count is defined only for a serial evaluation. The same

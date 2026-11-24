@@ -277,8 +277,15 @@ grafted onto another lock's pins; the refusal then reads the grafted lock. The `
 keeps the nix-unit step, which alone checks `expectedError.type`. Where
 `ci/tests-process.nix` exists, the process plane runs through `ci --tests-process`: the consumer's
 `apps.<system>.tests-process` program, run outside the sandbox so its cells call the column's
-`nix-instantiate`, and refused if its closure carries an evaluator (`process-plane.nix`). Formatting
-runs once.
+`nix-instantiate`, and refused if its closure carries an evaluator (`process-plane.nix`). The program
+and `ci --tests-error`'s runner run on the ci lock's engine of the family evaluating the devshell
+(`lockEvaluator`): where PATH's `nix` and `nix-instantiate` are already that engine with the settings
+`evaluator identity` reads, as in a column, nothing changes and the run prints
+`lock evaluator: <family> <engine> (found on PATH)`; anywhere else, a host's own Nix included, the
+engine is realised under `ci/.gcroots/evaluator-<family>`, put first on PATH with its `nix.conf`
+appended to `NIX_CONFIG` and `NIX_PATH` unset, and the line says `pinned`. A local run then matches the
+column on the keys the identity step reads; the host's other settings stay in force. To run another
+family's engine, enter the devshell with that family's `nix`. Formatting runs once.
 
 A green column does not cover a check that evaluates inside its build sandbox through `pkgs.nix`:
 that evaluation is the same in all three columns.
@@ -387,8 +394,8 @@ harness wires beside `ci` off the same guard. That holds whether they assert the
 
 ```
 nix develop ./ci -c ci               # the suites, then every declared check but tests-error, guarded
-nix develop ./ci -c ci --tests-error # the cells whose expr can abort, under the nix on PATH, then checks.tests-error, guarded
-nix develop ./ci -c ci --tests-process # per-process cells (apps.<system>.tests-process), under the nix on PATH
+nix develop ./ci -c ci --tests-error # the cells whose expr can abort, on the ci lock's engine, then checks.tests-error, guarded
+nix develop ./ci -c ci --tests-process # per-process cells (apps.<system>.tests-process), on the ci lock's engine
 nix flake check                      # in ci/ — treefmt, tree-root oracle, hooks; unguarded
 nix-unit --flake ./ci#tests          # the suites, unguarded
 nix-unit --flake ./ci#testsError     # the abort-capable cells, unguarded

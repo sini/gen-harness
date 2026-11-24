@@ -6,7 +6,9 @@
 # implementations differ. A verdict is evidence only for the evaluator that computed it, so the
 # cells cannot run in a build sandbox: there the evaluator is a derivation input, one drvPath
 # under every evaluator, one verdict substituted into every column (den-hoag-jutgv). They run as a
-# PROGRAM, `apps.<system>.tests-process`, whose `nix-instantiate` is the one on PATH.
+# PROGRAM, `apps.<system>.tests-process`, whose `nix-instantiate` is the one on PATH. This command
+# puts the ci lock's engine there first (`lockEvaluator`, below) unless PATH already holds it, as a
+# column's does, so a local run is judged by the evaluator a column would install.
 #
 # The consumer's contract, stated once here:
 #   - the program's closure carries NO evaluator (refused below — the guard's reason);
@@ -23,6 +25,9 @@
 {
   pkgs,
   name,
+  # `error-plane-engines.nix`'s value: the ci lock's `engines`, its `evalConf`, and `family`, read
+  # by the evaluator evaluating this expression. `lockEvaluator` binds that family's engine.
+  lockEngines,
 }:
 let
   inherit (pkgs) lib;
@@ -76,6 +81,92 @@ let
       fi
     '';
   };
+
+  # `<root> <cmd> [args…]`: exec <cmd> on the ci lock's engine of `lockEngines.family`, the family
+  # of the evaluator that evaluated this devshell (den-hoag-bqn7r). Bound here, so nothing is
+  # evaluated at run time, and the closure holds the engine's derivation, never its output.
+  #   FOUND: PATH's `nix` AND `nix-instantiate` both resolve under the engine (a CI column), and it
+  #     runs the settings `evaluators.yml`'s `evaluator identity` reads (EVAL_CONF, lazy-trees for
+  #     Determinate, NIX_PATH unset). Nothing is changed.
+  #   PINNED: anything else, settings included. The engine is realised to
+  #     `<root>/ci/.gcroots/evaluator-<family>` and its `bin` put first on PATH, its nix.conf
+  #     appended to NIX_CONFIG, NIX_PATH unset. The caller's other keys stay, so the run equals CI
+  #     only on the keys the identity step reads.
+  # EXIT before exec: 1 REFUSED, the engine could not be realised · 2 CONTROL FAILED.
+  lockEvaluator =
+    let
+      fam = lockEngines.family;
+      engine = lockEngines.engines.${fam};
+      # The identity step's keys, in its order.
+      checked = lockEngines.evalConf + lib.optionalString (fam == "determinate") "lazy-trees = true\n";
+    in
+    pkgs.writeShellApplication {
+      name = "${name}-ci-lock-evaluator";
+      # No runtimeInputs: they would prefix the PATH <cmd> inherits. coreutils by absolute path.
+      text = ''
+        root=$1
+        shift
+        fam=${lib.escapeShellArg fam}
+        want=${lib.escapeShellArg (builtins.unsafeDiscardStringContext engine.pkg.outPath)}
+        drv=${lib.escapeShellArg (builtins.unsafeDiscardOutputDependency engine.pkg.drvPath)}
+        checked=${lib.escapeShellArg checked}
+        conf=${lib.escapeShellArg (lockEngines.evalConf + engine.conf)}
+        at() {
+          local b
+          b=$(command -v "$1") || return 0
+          ${pkgs.coreutils}/bin/readlink -f "$b"
+        }
+        under() { case "$1" in "$want"/*) return 0 ;; *) return 1 ;; esac; }
+        nixAt=$(at nix)
+        instAt=$(at nix-instantiate)
+        had="nix ''${nixAt:-absent}, nix-instantiate ''${instAt:-absent}"
+        # BOTH binaries: the error-plane runner and the settings read call `nix`, the cells call
+        # `nix-instantiate` (gate den-hoag-bqn7r F1).
+        if under "$nixAt" && under "$instAt"; then
+          off=()
+          n=0
+          while IFS= read -r l; do
+            [ -n "$l" ] || continue
+            n=$((n + 1))
+            k=''${l%%=*}
+            k=''${k% }
+            v=''${l#*=}
+            v=''${v# }
+            got=$(nix config show "$k") || {
+              echo "CONTROL FAILED: the $fam evaluator $want could not report '$k' (nix config show)" >&2
+              exit 2
+            }
+            [ "$got" = "$v" ] || off+=("$k = $got")
+          done <<<"$checked"
+          if [ "$n" -eq 0 ]; then
+            echo "CONTROL FAILED: no ci-lock setting to check" >&2
+            exit 2
+          fi
+          [ -z "''${NIX_PATH:-}" ] || off+=("NIX_PATH set")
+          if [ "''${#off[@]}" -eq 0 ]; then
+            echo "lock evaluator: $fam $want (found on PATH)" >&2
+            exec "$@"
+          fi
+          had="$want with non-CI settings: ''${off[*]}"
+        fi
+        ${pkgs.coreutils}/bin/mkdir -p "$root/ci/.gcroots"
+        nix build --out-link "$root/ci/.gcroots/evaluator-$fam" "$drv^out" || {
+          echo "REFUSED: the ci lock's $fam evaluator $want could not be realised; PATH had $had" >&2
+          exit 1
+        }
+        if [ ! -x "$want/bin/nix-instantiate" ]; then
+          echo "CONTROL FAILED: the ci lock's $fam evaluator $want holds no bin/nix-instantiate" >&2
+          exit 2
+        fi
+        PATH="$want/bin:$PATH"
+        NIX_CONFIG="''${NIX_CONFIG:+''${NIX_CONFIG}
+        }$conf"
+        export PATH NIX_CONFIG
+        unset NIX_PATH
+        echo "lock evaluator: $fam $want (pinned; PATH had $had)" >&2
+        exec "$@"
+      '';
+    };
 in
 pkgs.writeShellApplication {
   name = "${name}-ci-tests-process";
@@ -156,7 +247,7 @@ pkgs.writeShellApplication {
     NIX_CONFIG="''${NIX_CONFIG:+''${NIX_CONFIG}
     }store = auto"
     export NIX_CONFIG
-    exec "$prog"
+    exec "${lockEvaluator}/bin/${name}-ci-lock-evaluator" "$root" "$prog"
   '';
-  passthru = { inherit guard evaluatorPath; };
+  passthru = { inherit guard evaluatorPath lockEvaluator; };
 }
